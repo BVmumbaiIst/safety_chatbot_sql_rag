@@ -2,6 +2,7 @@ import os
 import sqlite3
 import pandas as pd
 import streamlit as st
+st.set_page_config(page_title="💬 Interactive Data Chatbot", layout="wide")
 import json
 import numpy as np
 import traceback
@@ -232,31 +233,26 @@ def get_valid_emails(conn_users):
 # ------------------------
 # Load and Validate Databases
 # ------------------------
-def load_and_validate_databases():
-    """Safely load SQLite DB connections and return filter + user data."""
+try:
+    conn_items = get_connection_items()
+    conn_users = get_connection_users()
+
+    filters_items = get_filter_options_items(conn_items)
+    valid_emails = get_valid_emails(conn_users)
+
+    st.success("✅ Data loaded successfully and chatbot is ready.")
+
+except Exception as e:
+    st.error(f"❌ Failed to load data: {e}")
+    st.stop()
+finally:
     try:
-        conn_items = get_connection_items()
-        conn_users = get_connection_users()
-
-        filters = get_filter_options_items(conn_items)
-        emails = get_valid_emails(conn_users)
-
-        st.success("✅ Data loaded successfully and chatbot is ready.")
-        return filters, emails
-
-    except Exception as e:
-        st.error(f"❌ Failed to load data: {e}")
-        return None, None
-
-    finally:
-        # Always close DB connections safely
-        try:
-            if 'conn_items' in locals() and conn_items:
-                conn_items.close()
-            if 'conn_users' in locals() and conn_users:
-                conn_users.close()
-        except Exception:
-            pass
+        if 'conn_items' in locals():
+            conn_items.close()
+        if 'conn_users' in locals():
+            conn_users.close()
+    except Exception:
+        pass
 
 # ------------------------
 # LLM + Memory
@@ -279,7 +275,7 @@ llm = setup_llm()
 # ------------------------
 # Streamlit UI basic config
 # ------------------------
-st.set_page_config(page_title="💬 Interactive Data Chatbot", layout="wide")
+
 st.title("💬 Interactive Data Chatbot + Analytics Dashboard")
 
 # Stop execution early if DB paths are missing
@@ -333,13 +329,43 @@ if not st.session_state.get("logged_in", False):
 # ------------------------
 # Sidebar Filters
 # ------------------------
-st.sidebar.header("🔎 Apply Filters")
-date_range = st.sidebar.date_input(
-    "Select Date Range",
-    [filters_items["date_min"], filters_items["date_max"]] if filters_items["date_min"] is not None else [],
-    min_value=filters_items["date_min"],
-    max_value=filters_items["date_max"]
-)
+st.sidebar.header("🔍 Filter the Inspection Data")
+
+try:
+    # Safely get min and max date
+    date_min = filters_items.get("date_min")
+    date_max = filters_items.get("date_max")
+
+    # Only set default if both dates exist
+    if date_min and date_max:
+        default_dates = [
+            pd.to_datetime(date_min).date(),
+            pd.to_datetime(date_max).date()
+        ]
+    else:
+        default_dates = None
+
+    # Robust date input
+    date_range = st.sidebar.date_input(
+        "Select Date Range",
+        value=default_dates,
+        min_value=pd.to_datetime(date_min).date() if date_min else None,
+        max_value=pd.to_datetime(date_max).date() if date_max else None
+    )
+
+    # Normalize selection
+    if isinstance(date_range, (list, tuple)):
+        if len(date_range) == 0:
+            date_range = None
+        elif len(date_range) == 1:
+            date_range = (date_range[0], date_range[0])
+    else:
+        date_range = (date_range, date_range)
+
+except Exception as e:
+    st.error(f"❌ Error loading date filters: {e}")
+    st.text(traceback.format_exc())
+    date_range = None
 region = st.sidebar.multiselect("Select Regions", filters_items["regions"])
 template = st.sidebar.multiselect("Select Template", filters_items["templates"])
 employee = st.sidebar.multiselect("Select Employee (Owner Name)", filters_items["employees"])
@@ -350,49 +376,59 @@ row_limit = st.sidebar.slider("Limit number of rows:", min_value=10, max_value=5
 # ------------------------
 # Dynamic SQL Query Builder
 # ------------------------
-items_table_name = get_single_table_name(conn_items)
+def sql_list(values):
+    """Safely format list values for SQL IN clause."""
+    safe = [str(v).replace("'", "''") for v in values]
+    return ",".join([f"'{s}'" for s in safe])
 
+# other filters (region, template, etc.)
+region = st.sidebar.multiselect("Select Region", filters_items["region"])
+template = st.sidebar.multiselect("Select Template", filters_items["TemplateNames"])
+employee = st.sidebar.multiselect("Select Employee", filters_items["owner_name"])
+status = st.sidebar.multiselect("Select Status", filters_items["status"])
+employee_status = st.sidebar.multiselect("Select Employee Status", filters_items["employee_status"])
+
+# Build WHERE clause
 sql_filters = []
-
-if date_range:
-    start_date = pd.to_datetime(date_range[0]).strftime("%Y-%m-%d")
-    end_date = pd.to_datetime(date_range[1]).strftime("%Y-%m-%d")
-    sql_filters.append(f'"date completed" BETWEEN "{start_date}" AND "{end_date}"')
-
 if region:
-    region_values = ",".join([f"'{r}'" for r in region])
-    sql_filters.append(f"region IN ({region_values})")
-
+    sql_filters.append(f"region IN ({sql_list(region)})")
 if template:
-    template_values = ",".join([f"'{t}'" for t in template])
-    sql_filters.append(f'"TemplateNames" IN ({template_values})')
-
+    sql_filters.append(f"TemplateNames IN ({sql_list(template)})")
 if employee:
-    employee_values = ",".join([f"'{e}'" for e in employee])
-    sql_filters.append(f'"owner name" IN ({employee_values})')
-
+    sql_filters.append(f"`owner name` IN ({sql_list(employee)})")
 if status:
-    status_values = ",".join([f"'{s}'" for s in status])
-    sql_filters.append(f'"assignee status" IN ({status_values})')
-
+    sql_filters.append(f"status IN ({sql_list(status)})")
 if employee_status:
-    employee_status_values = ",".join([f"'{es}'" for es in employee_status])
-    sql_filters.append(f'"employee status" IN ({employee_status_values})')
+    sql_filters.append(f"employee_status IN ({sql_list(employee_status)})")
+if date_range and len(date_range) == 2:
+    sql_filters.append(f"date BETWEEN '{date_range[0]}' AND '{date_range[1]}'")
 
 where_clause = " AND ".join(sql_filters) if sql_filters else "1=1"
-default_query = f'SELECT * FROM "{items_table_name}" WHERE {where_clause} LIMIT {row_limit};'
-sql_query = st.sidebar.text_area("✏️ Edit SQL Query", value=default_query, height=140)
+sql_query = f"SELECT * FROM inspection_employee_schedule_items WHERE {where_clause};"
+
 st.sidebar.code(sql_query, language="sql")
 
 
+# =====================================================
+# Run Query Button
+# =====================================================
 if st.sidebar.button("Run Query"):
     try:
+        conn_items = get_connection_items()
         df = pd.read_sql(sql_query, conn_items)
         st.session_state["filtered_df"] = df
-        st.success(f"Loaded {len(df)} rows.")
-        st.dataframe(df)
+
+        st.success(f"✅ Loaded {len(df)} rows from filtered query.")
+        st.dataframe(df.head(20))
+
     except Exception as e:
         st.error(f"❌ SQL Error: {e}")
+        st.text(traceback.format_exc())
+    finally:
+        try:
+            conn_items.close()
+        except Exception:
+            pass
 
 # ------------------------
 # Setup Agents
