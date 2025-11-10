@@ -233,26 +233,31 @@ def get_valid_emails(conn_users):
 # ------------------------
 # Load and Validate Databases
 # ------------------------
-try:
-    conn_items = get_connection_items()
-    conn_users = get_connection_users()
-
-    filters_items = get_filter_options_items(conn_items)
-    valid_emails = get_valid_emails(conn_users)
-
-    st.success("✅ Data loaded successfully and chatbot is ready.")
-
-except Exception as e:
-    st.error(f"❌ Failed to load data: {e}")
-    st.stop()
-finally:
+def load_and_validate_databases():
+    """Safely load SQLite DB connections and return filter + user data."""
     try:
-        if 'conn_items' in locals():
-            conn_items.close()
-        if 'conn_users' in locals():
-            conn_users.close()
-    except Exception:
-        pass
+        conn_items = get_connection_items()
+        conn_users = get_connection_users()
+
+        filters = get_filter_options_items(conn_items)
+        emails = get_valid_emails(conn_users)
+
+        st.success("✅ Data loaded successfully and chatbot is ready.")
+        return filters, emails
+
+    except Exception as e:
+        st.error(f"❌ Failed to load data: {e}")
+        return None, None
+
+    finally:
+        # Always close DB connections safely
+        try:
+            if 'conn_items' in locals() and conn_items:
+                conn_items.close()
+            if 'conn_users' in locals() and conn_users:
+                conn_users.close()
+        except Exception:
+            pass
 
 # ------------------------
 # LLM + Memory
