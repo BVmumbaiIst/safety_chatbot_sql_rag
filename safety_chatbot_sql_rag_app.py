@@ -428,230 +428,244 @@ with col_left:
                 return True
         return False
 
-    if st.button("Ask Chatbot (Analyze)"):
-        if not user_question or len(user_question.strip()) == 0:
+        if st.button("Ask Chatbot (Analyze)"):
+        if not user_question.strip():
             st.warning("Please enter a question.")
         else:
             try:
-                # CASE A: If preview SQL exists, analyze filtered preview (or run limited query)
-                if st.session_state.get("filtered_sql"):
-                    # run a slightly larger limited query for analysis (bounded)
-                    analysis_limit = min(2000, max(200, row_limit))
-                    analysis_sql = st.session_state["filtered_sql"].rstrip().rstrip(";")
-                    analysis_sql = f"{analysis_sql} LIMIT {analysis_limit};"
-                    df_for_analysis = run_sql_query(DB_PATH_ITEMS, analysis_sql)
-
-                    # Generat summary string for LLM fallback
-                    try:
-                        numeric_summary = (
-                            df_for_analysis.describe(include=[np.number]).transpose().round(2)
+                st.info("🤖 Understanding your question and generating query...")
+    
+                # STEP 1 — Convert natural query → SQL (use LLM)
+                sql_prompt = f"""
+    You are a SQL expert. Convert the following natural language question into an SQLite SQL query
+    that can be run on a table named "{items_table_name}" with columns like:
+    ['region', 'TemplateNames', 'owner name', 'assignee status', 'date completed', 'responses']
+    
+    Question: "{user_question}"
+    
+    Rules:
+    - Only output the SQL query (no markdown or explanation).
+    - Use correct column names if mentioned.
+    - Include filtering by region, employee, template, or date if specified.
+    - Limit results to 1000 rows for performance.
+    """
+                sql_query = ""
+                try:
+                    sql_out = llm.invoke(sql_prompt)
+                    sql_query = sql_out.content.strip() if hasattr(sql_out, "content") else str(sql_out).strip()
+                except Exception as e:
+                    st.warning(f"⚠️ Could not generate SQL with LLM: {e}")
+                    sql_query = ""
+    
+                if not sql_query or "SELECT" not in sql_query.upper():
+                    st.warning("LLM did not generate a valid SQL query — running summary on full data instead.")
+                    sql_query = f'SELECT * FROM "{items_table_name}" LIMIT 1000;'
+    
+                st.code(sql_query, language="sql")
+    
+                # STEP 2 — Run SQL safely
+                df_result = run_sql_query(DB_PATH_ITEMS, sql_query)
+                if df_result.empty:
+                    st.warning("No data found for your query.")
+                    st.stop()
+    
+                # Convert date columns safely
+                if "date completed" in df_result.columns:
+                    df_result["date completed"] = pd.to_datetime(df_result["date completed"], errors="coerce")
+    
+                # STEP 3 — KPIs
+                st.markdown("### 📊 Key Metrics")
+                total_records = len(df_result)
+                unique_regions = df_result["region"].nunique() if "region" in df_result.columns else 0
+                unique_templates = df_result["TemplateNames"].nunique() if "TemplateNames" in df_result.columns else 0
+                unique_employees = df_result["owner name"].nunique() if "owner name" in df_result.columns else 0
+                top_template = (
+                    df_result["TemplateNames"].value_counts().idxmax()
+                    if "TemplateNames" in df_result.columns and not df_result["TemplateNames"].empty
+                    else "N/A"
+                )
+                top_employee = (
+                    df_result["owner name"].value_counts().idxmax()
+                    if "owner name" in df_result.columns and not df_result["owner name"].empty
+                    else "N/A"
+                )
+    
+                # Compute status counts
+                completed_count = 0
+                missed_count = 0
+                late_count = 0
+                if "assignee status" in df_result.columns:
+                    status_counts = df_result["assignee status"].value_counts().to_dict()
+                    completed_count = status_counts.get("Complete", 0)
+                    missed_count = status_counts.get("Missed", 0)
+                    late_count = status_counts.get("Late Complete", 0)
+    
+                col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
+                col1.metric("Total Records", total_records)
+                col2.metric("Regions", unique_regions)
+                col3.metric("Templates", unique_templates)
+                col4.metric("Employees", unique_employees)
+                col5.metric("Top Template", top_template)
+                col6.metric("Top Employee", top_employee)
+                col7.metric("Completed", completed_count)
+                col8.metric("Missed", missed_count)
+    
+                try:
+                    style_metric_cards(
+                        background_color="#f8f9fa",
+                        border_color="#e0e0e0",
+                        border_radius_px=12,
+                    )
+                except Exception:
+                    pass
+    
+                # STEP 4 — Auto Visuals
+                st.markdown("### 📈 Auto-Generated Visuals")
+                vivid_colors = px.colors.qualitative.Vivid
+    
+                try:
+                    if "region" in df_result.columns and "TemplateNames" in df_result.columns:
+                        region_count = df_result.groupby("region")["TemplateNames"].count().reset_index(name="count")
+                        fig = px.bar(
+                            region_count, x="region", y="count", text="count",
+                            color="region", color_discrete_sequence=vivid_colors,
+                            title="Inspections by Region"
                         )
-                        categorical_summary = {
-                            col: df_for_analysis[col].value_counts().head(5).to_dict()
-                            for col in df_for_analysis.select_dtypes(include='object').columns
-                        }
-                        summary = f"Numerical Summary:\n{numeric_summary.to_string()}\n\nTop categories:\n{json.dumps(categorical_summary, indent=2)}"
-                    except Exception:
-                        summary = f"Rows: {len(df_for_analysis)}"
-
-                    # ------------------------
-                    # KPIs SECTION
-                    # ------------------------
-                    st.markdown("### 📊 Key Metrics")
-                    total_records = len(df_for_analysis)
-                    unique_regions = (
-                        df_for_analysis["region"].nunique()
-                        if "region" in df_for_analysis.columns
-                        else 0
-                    )
-                    top_template = (
-                        df_for_analysis["TemplateNames"].value_counts().idxmax()
-                        if "TemplateNames" in df_for_analysis.columns and not df_for_analysis["TemplateNames"].isna().all()
-                        else "N/A"
-                    )
-                    top_employee = (
-                        df_for_analysis["owner name"].value_counts().idxmax()
-                        if "owner name" in df_for_analysis.columns and not df_for_analysis["owner name"].isna().all()
-                        else "N/A"
-                    )
-
-                    col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("Total Records", total_records)
-                    col2.metric("Unique Regions", unique_regions)
-                    col3.metric("Top Template", top_template)
-                    col4.metric("Top Employee", top_employee)
-
-                    # Style metric cards (optional)
-                    try:
-                        style_metric_cards(
-                            background_color="#f8f9fa",
-                            border_color="#e0e0e0",
-                            border_radius_px=12,
+                        st.plotly_chart(fig, use_container_width=True)
+    
+                    if "TemplateNames" in df_result.columns:
+                        template_count = df_result["TemplateNames"].value_counts().head(10).reset_index()
+                        template_count.columns = ["TemplateNames", "count"]
+                        fig = px.bar(
+                            template_count, x="TemplateNames", y="count", text="count",
+                            color="TemplateNames", title="Top 10 Templates by Count"
                         )
-                    except Exception:
-                        pass
-
-                    # ------------------------
-                    # Relevance detection
-                    # ------------------------
-                    relevance = False
-                    if llm:
-                        try:
-                            preview_rows = df_for_analysis.head(5).to_dict(orient="records")
-                            prompt = f"""You are an assistant. Preview rows: {json.dumps(preview_rows)}. Question: "{user_question}". Respond ONLY RELATED or UNRELATED."""
-                            out = llm.invoke(prompt).strip().upper()
-                            relevance = "RELATED" in out
-                        except Exception:
-                            relevance = detect_relevance_simple(user_question, df_for_analysis)
-                    else:
-                        relevance = detect_relevance_simple(user_question, df_for_analysis)
-
-                    # ------------------------
-                    # Build LLM analytical prompt (safe: kpi_text always defined)
-                    # ------------------------
-                    kpi_text = f"Total Records: {total_records}\nTop Template: {top_template}\nTop Employee: {top_employee}"
-
-                    if llm:
-                        task_prompt = f"""
-You are a senior data analyst. Summary:
-{summary}
-
-KPIs:
-{kpi_text}
-
-User question: {user_question}
-
-Requirements:
-1) Answer the question clearly using the filtered data.
-2) Show KPI counts and percentage breakdowns for TemplateNames (top few).
-3) Highlight top/bottom regions, templates, responses, assignee status, employees (if available).
-4) Suggest 2 actionable recommendations.
-5) If possible, compare selected month vs previous month deviations.
-
-Return a concise markdown-formatted report.
-"""
-                        try:
-                            llm_out = llm.invoke(task_prompt)
-                            answer_text = llm_out.content if hasattr(llm_out, "content") else str(llm_out)
-                        except Exception as e:
-                            answer_text = f"❌ LLM error: {e}\n\nFallback summary:\n{summary}"
-                    else:
-                        # fallback simple analysis when LLM not available
-                        top_templates = df_for_analysis["TemplateNames"].value_counts().head(5).to_dict() if "TemplateNames" in df_for_analysis.columns else {}
-                        answer_text = f"Fallback analysis (LLM not available).\nRows: {len(df_for_analysis)}\nTop templates: {top_templates}"
-
-                    st.markdown("### 📋 Chatbot Response")
+                        st.plotly_chart(fig, use_container_width=True)
+    
+                    if "owner name" in df_result.columns:
+                        emp_count = df_result["owner name"].value_counts().head(10).reset_index()
+                        emp_count.columns = ["owner name", "count"]
+                        fig = px.bar(
+                            emp_count, x="owner name", y="count", text="count",
+                            color="owner name", title="Top 10 Employees by Inspection Count"
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+    
+                    if "assignee status" in df_result.columns:
+                        status_count = df_result["assignee status"].value_counts().reset_index()
+                        status_count.columns = ["assignee status", "count"]
+                        fig = px.pie(
+                            status_count, values="count", names="assignee status",
+                            title="Distribution of Assignee Status",
+                            color_discrete_sequence=px.colors.qualitative.Set3
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+    
+                except Exception as viz_err:
+                    st.warning(f"⚠️ Could not render all visuals: {viz_err}")
+    
+                # STEP 5 — Analytical LLM Summary
+                try:
+                    summary_prompt = f"""
+    You are a senior data analyst.
+    Below is a preview of the dataset and its metrics.
+    
+    Sample rows:
+    {df_result.head(10).to_json(orient="records")}
+    
+    KPIs:
+    - Total Records: {total_records}
+    - Unique Regions: {unique_regions}
+    - Unique Templates: {unique_templates}
+    - Top Template: {top_template}
+    - Top Employee: {top_employee}
+    - Completed Count: {completed_count}
+    - Missed Count: {missed_count}
+    - Late Count: {late_count}
+    
+    User Question: {user_question}
+    
+    Task:
+    1. Summarize this data in context of the question.
+    2. Highlight key KPIs, trends, and anomalies.
+    3. Identify top/bottom performing regions, templates, or employees.
+    4. Provide 2 actionable recommendations.
+    5. Format the output as a markdown analytical report.
+    """
+                    analysis_out = llm.invoke(summary_prompt)
+                    answer_text = analysis_out.content if hasattr(analysis_out, "content") else str(analysis_out)
+                    st.markdown("### 🧠 Analytical Report")
                     st.markdown(answer_text)
-
-                    # ------------------------
-                    # AUTO-GENERATED VISUALS (based on df_for_analysis)
-                    # ------------------------
-                    st.markdown("### 📈 Auto-Generated Visual Insights")
-                    vivid_colors = px.colors.qualitative.Vivid
-                    df_viz = df_for_analysis  # alias
-
-                    try:
-                        # Region bar
-                        if "region" in df_viz.columns and "TemplateNames" in df_viz.columns:
-                            region_count = df_viz.groupby("region")["TemplateNames"].count().reset_index(name="count")
-                            fig = px.bar(region_count, x="region", y="count", text="count", color="region", color_discrete_sequence=vivid_colors, title="Inspections by Region")
-                            st.plotly_chart(fig, use_container_width=True)
-
-                        # Template distribution
-                        if "TemplateNames" in df_viz.columns:
-                            template_count = df_viz["TemplateNames"].value_counts().head(10).reset_index()
-                            template_count.columns = ["TemplateNames", "count"]
-                            fig = px.bar(template_count, x="TemplateNames", y="count", color="TemplateNames", text="count", title="Top 10 Templates by Inspection Count")
-                            st.plotly_chart(fig, use_container_width=True)
-
-                        # Employee distribution
-                        if "owner name" in df_viz.columns:
-                            emp_count = df_viz["owner name"].value_counts().head(10).reset_index()
-                            emp_count.columns = ["owner name", "count"]
-                            fig = px.bar(emp_count, x="owner name", y="count", color="owner name", text="count", title="Top 10 Employees by Inspection Count")
-                            st.plotly_chart(fig, use_container_width=True)
-
-                        # Assignee status pie
-                        if "assignee status" in df_viz.columns:
-                            status_count = df_viz["assignee status"].value_counts().reset_index()
-                            status_count.columns = ["assignee status", "count"]
-                            fig = px.pie(status_count, values="count", names="assignee status", title="Distribution of Assignee Status", color_discrete_sequence=px.colors.qualitative.Set3)
-                            st.plotly_chart(fig, use_container_width=True)
-
-                    except Exception as e:
-                        st.warning(f"⚠️ Could not generate visuals automatically: {e}")
-
-                    # cleanup
-                    del df_for_analysis
-                    gc.collect()
-
-                else:
-                    # CASE B: No filtered SQL — run a small aggregated query on full items
-                    st.info("No filtered query found. Running a small aggregated analysis on the items table.")
-                    agg_sql = f'SELECT "TemplateNames", COUNT(*) as cnt FROM "{items_table_name}" GROUP BY "TemplateNames" ORDER BY cnt DESC LIMIT 20;'
-                    agg_df = run_sql_query(DB_PATH_ITEMS, agg_sql)
-                    st.markdown("### Top Templates (aggregated)")
-                    st.dataframe(agg_df)
-
-            except Exception as outer_e:
-                st.error(f"❌ Chatbot failed: {outer_e}")
-                st.text(traceback.format_exc())
+                except Exception as e:
+                    st.warning(f"⚠️ Could not generate AI analytical report: {e}")
+    
+                # STEP 6 — Show Data Preview
+                st.markdown("### 📋 Filtered Data Preview")
+                st.dataframe(df_result.head(50))
+    
+                # Cleanup
+                del df_result
                 gc.collect()
+    
+            except Exception as e:
+                st.error(f"❌ Error running chatbot: {e}")
+                st.text(traceback.format_exc())
 
-
-# ============================================================
-# Right Panel: Filtered Preview + Charts
-# ============================================================
-with col_right:
-    st.subheader("📊 Filtered Data & Visualizations (Preview)")
-
-    preview = st.session_state.get("filtered_preview")
-    if preview is not None and not preview.empty:
-        st.markdown("### 🔍 Preview (sample from Run Query)")
-        st.dataframe(preview)
-
-        # Completion by month chart
-        try:
-            if "date completed" in preview.columns:
-                preview2 = preview.assign(
-                    completion_month=pd.to_datetime(
-                        preview["date completed"], errors="coerce"
+    
+    
+    # ============================================================
+    # Right Panel: Filtered Preview + Charts
+    # ============================================================
+    with col_right:
+        st.subheader("📊 Filtered Data & Visualizations (Preview)")
+    
+        preview = st.session_state.get("filtered_preview")
+        if preview is not None and not preview.empty:
+            st.markdown("### 🔍 Preview (sample from Run Query)")
+            st.dataframe(preview)
+    
+            # Completion by month chart
+            try:
+                if "date completed" in preview.columns:
+                    preview2 = preview.assign(
+                        completion_month=pd.to_datetime(
+                            preview["date completed"], errors="coerce"
+                        )
+                        .dt.to_period("M")
+                        .astype(str)
                     )
-                    .dt.to_period("M")
-                    .astype(str)
-                )
-                chart_df = (
-                    preview2.groupby("completion_month")["TemplateNames"]
-                    .count()
-                    .reset_index(name="template_count")
-                    .sort_values("completion_month")
-                )
-                st.markdown("### 📅 Inspections by Completion Month")
-                st.bar_chart(
-                    chart_df.set_index("completion_month")["template_count"]
-                )
-        except Exception:
-            pass
-
-        # Template Preview
-        try:
-            if "TemplateNames" in preview.columns:
-                template_count = (
-                    preview["TemplateNames"].value_counts().head(10).reset_index()
-                )
-                template_count.columns = ["TemplateNames", "count"]
-                fig = px.bar(
-                    template_count,
-                    x="TemplateNames",
-                    y="count",
-                    text="count",
-                    title="Top Templates (preview)",
-                )
-                st.plotly_chart(fig, use_container_width=True)
-        except Exception:
-            pass
-    else:
-        st.info("ℹ️ No preview available. Use sidebar filters and click 'Run Query'.")
+                    chart_df = (
+                        preview2.groupby("completion_month")["TemplateNames"]
+                        .count()
+                        .reset_index(name="template_count")
+                        .sort_values("completion_month")
+                    )
+                    st.markdown("### 📅 Inspections by Completion Month")
+                    st.bar_chart(
+                        chart_df.set_index("completion_month")["template_count"]
+                    )
+            except Exception:
+                pass
+    
+            # Template Preview
+            try:
+                if "TemplateNames" in preview.columns:
+                    template_count = (
+                        preview["TemplateNames"].value_counts().head(10).reset_index()
+                    )
+                    template_count.columns = ["TemplateNames", "count"]
+                    fig = px.bar(
+                        template_count,
+                        x="TemplateNames",
+                        y="count",
+                        text="count",
+                        title="Top Templates (preview)",
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+            except Exception:
+                pass
+        else:
+            st.info("ℹ️ No preview available. Use sidebar filters and click 'Run Query'.")
 
 # ============================================================
 # Memory Debug (optional)
