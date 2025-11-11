@@ -428,7 +428,7 @@ with col_left:
                 return True
         return False
 
-        if st.button("Ask Chatbot (Analyze)"):
+    if st.button("Ask Chatbot (Analyze)"):
         if not user_question.strip():
             st.warning("Please enter a question.")
         else:
