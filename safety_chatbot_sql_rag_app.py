@@ -669,3 +669,19 @@ if st.checkbox("Show memory usage (debug)", value=False):
 # End of file
 # ============================================================
 
+# ------------------------
+# Page Navigation
+# ------------------------
+st.sidebar.title("📑 Navigation")
+
+TEMPLATES = sorted(filters["templates"])  # from your DB
+PAGES = ["🏠 Home"] + TEMPLATES
+
+selected_page = st.sidebar.radio("Go to", PAGES)
+
+if selected_page == "🏠 Home":
+    render_home_page(df_items)
+else:
+    render_template_page(df_items, selected_page)
+
+
