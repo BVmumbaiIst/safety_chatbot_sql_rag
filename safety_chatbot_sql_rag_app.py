@@ -751,22 +751,3 @@ if st.checkbox("Show memory usage (debug)", value=False):
 
 
 
-if selected_page == "🏠 Home":
-    render_home_page(df_items)
-else:
-    render_template_page(df_items, selected_page)
-
-# ------------------------
-# Page Navigation
-# ------------------------
-st.sidebar.title("📑 Navigation")
-
-TEMPLATES = sorted(items_meta["distincts"].get("TemplateNames", []))
-PAGES = ["🏠 Home"] + TEMPLATES
-
-selected_page = st.sidebar.radio("Go to", PAGES)
-
-if selected_page == "🏠 Home":
-    render_home_page_sql()
-else:
-    render_template_page_sql(selected_page)
