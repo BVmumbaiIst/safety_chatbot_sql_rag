@@ -408,6 +408,83 @@ if rag_enabled and LANGCHAIN_AVAILABLE:
                 st.exception(e)
                 gc.collect()
 
+
+# ------------------------
+# Page Navigation
+# ------------------------
+st.sidebar.title("📑 Navigation")
+
+TEMPLATES = sorted(items_meta["distincts"].get("TemplateNames", []))
+PAGES = ["🏠 Home"] + TEMPLATES
+
+selected_page = st.sidebar.radio("Go to", PAGES)
+
+if selected_page == "🏠 Home":
+    render_home_page_sql()
+else:
+    render_template_page_sql(selected_page)
+
+def render_home_page_sql():
+    st.header("🏠 Home — All Templates Overview")
+
+    sql = f'''
+        SELECT "TemplateNames", COUNT(*) AS cnt
+        FROM "{items_table_name}"
+        GROUP BY "TemplateNames"
+        ORDER BY cnt DESC
+    '''
+    df = run_sql_query(DB_PATH_ITEMS, sql)
+
+    fig = px.bar(
+        df,
+        x="TemplateNames",
+        y="cnt",
+        text="cnt",
+        title="Inspections by Template"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("💬 Chatbot (All Templates)")
+
+def render_template_page_sql(template_name):
+    st.header(f"📋 Template: {template_name}")
+
+    sql = f'''
+        SELECT *
+        FROM "{items_table_name}"
+        WHERE "TemplateNames" = ?
+    '''
+
+    df = run_sql_query(DB_PATH_ITEMS, sql, params=[template_name], limit_rows=2000)
+
+    if df.empty:
+        st.warning("No data found for this template.")
+        return
+
+    # Bar: Region
+    if "region" in df.columns:
+        rc = df["region"].value_counts().reset_index()
+        rc.columns = ["region", "count"]
+        fig = px.bar(rc, x="region", y="count", title="By Region", text="count")
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Pie: Assignee Status
+    if "assignee status" in df.columns:
+        fig = px.pie(
+            df,
+            names="assignee status",
+            title="Assignee Status Distribution"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("📄 Data Preview")
+    st.dataframe(df.head(500), use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("💬 Chatbot (Template Scoped)")
+
+
 # ============================================================
 # Main UI: left column for chat, right for visuals
 # ============================================================
@@ -464,22 +541,27 @@ with col_left:
                         if "region" in df_for_analysis.columns
                         else 0
                     )
+                    template_count = (
+                        df_for_analysis["TemplateNames"].nunique()
+                        if "TemplateNames" in df_for_analysis.columns
+                        else 0
+                    )
+                    employee_count = (
+                        df_for_analysis["owner name"].nunique()
+                        if "owner name" in df_for_analysis.columns
+                        else 0
+                    )
                     top_template = (
-                        df_for_analysis["TemplateNames"].value_counts().idxmax()
-                        if "TemplateNames" in df_for_analysis.columns and not df_for_analysis["TemplateNames"].isna().all()
-                        else "N/A"
-                    )
-                    top_employee = (
-                        df_for_analysis["owner name"].value_counts().idxmax()
-                        if "owner name" in df_for_analysis.columns and not df_for_analysis["owner name"].isna().all()
-                        else "N/A"
-                    )
-
+                                df_for_analysis["TemplateNames"].value_counts().idxmax()
+                                if "TemplateNames" in df_for_analysis.columns and not df_for_analysis["TemplateNames"].isna().all()
+                                else "N/A"
+                                )
+                
                     col1, col2, col3, col4 = st.columns(4)
                     col1.metric("Total Records", total_records)
                     col2.metric("Unique Regions", unique_regions)
-                    col3.metric("Top Template", top_template)
-                    col4.metric("Top Employee", top_employee)
+                    col3.metric("Template", template_count)
+                    col4.metric("Employee", employee_count)
 
                     # Style metric cards (optional)
                     try:
@@ -669,15 +751,7 @@ if st.checkbox("Show memory usage (debug)", value=False):
 # End of file
 # ============================================================
 
-# ------------------------
-# Page Navigation
-# ------------------------
-st.sidebar.title("📑 Navigation")
 
-TEMPLATES = sorted(filters["TemplateNames"])  # from your DB
-PAGES = ["🏠 Home"] + TEMPLATES
-
-selected_page = st.sidebar.radio("Go to", PAGES)
 
 if selected_page == "🏠 Home":
     render_home_page(df_items)
