@@ -409,8 +409,6 @@ if rag_enabled and LANGCHAIN_AVAILABLE:
                 gc.collect()
 
 
-
-
 def render_home_page_sql():
     st.header("🏠 Home — All Templates Overview")
 
@@ -470,7 +468,20 @@ def render_template_page_sql(template_name):
 
     st.markdown("---")
     st.subheader("💬 Chatbot (Template Scoped)")
+# ------------------------
+# Page Navigation
+# ------------------------
+st.sidebar.title("📑 Navigation")
 
+TEMPLATES = sorted(items_meta["distincts"].get("TemplateNames", []))
+PAGES = ["🏠 Home"] + TEMPLATES
+
+selected_page = st.sidebar.radio("Go to", PAGES)
+
+if selected_page == "🏠 Home":
+    render_home_page_sql()
+else:
+    render_template_page_sql(selected_page)
 
 # ============================================================
 # Main UI: left column for chat, right for visuals
