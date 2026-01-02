@@ -415,12 +415,12 @@ tab_overview, = st.tabs(["🏠 Overview"])
 with tab_overview:
     st.header("🏠 Overview — All Templates")
 
-    sql = f""
+    sql = f"""
         SELECT "TemplateNames", COUNT(*) AS cnt
         FROM "{items_table_name}"
         GROUP BY "TemplateNames"
-        ORDER BY cnt DESC 
-        ""
+        ORDER BY cnt DESC.
+    """
 
     df_overview = run_sql_query(DB_PATH_ITEMS, sql)
 
