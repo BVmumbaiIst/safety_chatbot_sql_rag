@@ -409,79 +409,40 @@ if rag_enabled and LANGCHAIN_AVAILABLE:
                 gc.collect()
 
 
-def render_home_page_sql():
-    st.header("🏠 Home — All Templates Overview")
+with tab_overview:
+    st.header("🏠 Overview — All Templates")
 
-    sql = f'''
+    sql = f"""
         SELECT "TemplateNames", COUNT(*) AS cnt
         FROM "{items_table_name}"
         GROUP BY "TemplateNames"
         ORDER BY cnt DESC
-    '''
-    df = run_sql_query(DB_PATH_ITEMS, sql)
+    """
 
-    fig = px.bar(
-        df,
-        x="TemplateNames",
-        y="cnt",
-        text="cnt",
-        title="Inspections by Template"
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    df_overview = run_sql_query(DB_PATH_ITEMS, sql)
 
-    st.markdown("---")
-    st.subheader("💬 Chatbot (All Templates)")
-
-def render_template_page_sql(template_name):
-    st.header(f"📋 Template: {template_name}")
-
-    sql = f'''
-        SELECT *
-        FROM "{items_table_name}"
-        WHERE "TemplateNames" = ?
-    '''
-
-    df = run_sql_query(DB_PATH_ITEMS, sql, params=[template_name], limit_rows=2000)
-
-    if df.empty:
-        st.warning("No data found for this template.")
-        return
-
-    # Bar: Region
-    if "region" in df.columns:
-        rc = df["region"].value_counts().reset_index()
-        rc.columns = ["region", "count"]
-        fig = px.bar(rc, x="region", y="count", title="By Region", text="count")
-        st.plotly_chart(fig, use_container_width=True)
-
-    # Pie: Assignee Status
-    if "assignee status" in df.columns:
-        fig = px.pie(
-            df,
-            names="assignee status",
-            title="Assignee Status Distribution"
+    if df_overview.empty:
+        st.warning("No inspection data available.")
+    else:
+        fig = px.bar(
+            df_overview,
+            x="TemplateNames",
+            y="cnt",
+            text="cnt",
+            title="Inspections by Template",
         )
+        fig.update_layout(xaxis_title="Template", yaxis_title="Inspection Count")
         st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("📄 Data Preview")
-    st.dataframe(df.head(500), use_container_width=True)
-
     st.markdown("---")
-    st.subheader("💬 Chatbot (Template Scoped)")
-# ------------------------
-# Page Navigation
-# ------------------------
-st.sidebar.title("📑 Navigation")
+    st.subheader("💬 Chatbot — Global Overview")
 
-TEMPLATES = sorted(items_meta["distincts"].get("TemplateNames", []))
-PAGES = ["🏠 Home"] + TEMPLATES
+    st.info("Chatbot will answer questions across all templates.")
 
-selected_page = st.sidebar.radio("Go to", PAGES)
+st.markdown("## 📊 Safety Optimise Dashboard")
 
-if selected_page == "🏠 Home":
-    render_home_page_sql()
-else:
-    render_template_page_sql(selected_page)
+tab_overview = st.tabs(["🏠 Overview"])[0]
+
 
 # ============================================================
 # Main UI: left column for chat, right for visuals
