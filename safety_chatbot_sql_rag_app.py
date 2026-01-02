@@ -409,20 +409,7 @@ if rag_enabled and LANGCHAIN_AVAILABLE:
                 gc.collect()
 
 
-# ------------------------
-# Page Navigation
-# ------------------------
-st.sidebar.title("📑 Navigation")
 
-TEMPLATES = sorted(items_meta["distincts"].get("TemplateNames", []))
-PAGES = ["🏠 Home"] + TEMPLATES
-
-selected_page = st.sidebar.radio("Go to", PAGES)
-
-if selected_page == "🏠 Home":
-    render_home_page_sql()
-else:
-    render_template_page_sql(selected_page)
 
 def render_home_page_sql():
     st.header("🏠 Home — All Templates Overview")
@@ -758,4 +745,17 @@ if selected_page == "🏠 Home":
 else:
     render_template_page(df_items, selected_page)
 
+# ------------------------
+# Page Navigation
+# ------------------------
+st.sidebar.title("📑 Navigation")
 
+TEMPLATES = sorted(items_meta["distincts"].get("TemplateNames", []))
+PAGES = ["🏠 Home"] + TEMPLATES
+
+selected_page = st.sidebar.radio("Go to", PAGES)
+
+if selected_page == "🏠 Home":
+    render_home_page_sql()
+else:
+    render_template_page_sql(selected_page)
