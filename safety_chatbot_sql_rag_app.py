@@ -674,7 +674,7 @@ if st.checkbox("Show memory usage (debug)", value=False):
 # ------------------------
 st.sidebar.title("📑 Navigation")
 
-TEMPLATES = sorted(filters["templates"])  # from your DB
+TEMPLATES = sorted(filters["TemplateNames"])  # from your DB
 PAGES = ["🏠 Home"] + TEMPLATES
 
 selected_page = st.sidebar.radio("Go to", PAGES)
