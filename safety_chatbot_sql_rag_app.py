@@ -408,44 +408,6 @@ if rag_enabled and LANGCHAIN_AVAILABLE:
                 st.exception(e)
                 gc.collect()
 
-st.markdown("## 📊 Safety Optimise Dashboard")
-
-tab_overview, = st.tabs(["🏠 Overview"])
-
-with tab_overview:
-    st.header("🏠 Overview — All Templates")
-
-    sql = f"""
-        SELECT "TemplateNames", COUNT(*) AS cnt
-        FROM "{items_table_name}"
-        GROUP BY "TemplateNames"
-        ORDER BY cnt DESC.
-    """
-
-    df_overview = run_sql_query(DB_PATH_ITEMS, sql)
-
-    if df_overview.empty:
-        st.warning("No inspection data available.")
-    else:
-        fig = px.bar(
-            df_overview,
-            x="TemplateNames",
-            y="cnt",
-            text="cnt",
-            title="Inspections by Template"
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-    st.markdown("---")
-    st.subheader("💬 Chatbot — Global Overview")
-
-tab1, tab2 = st.tabs(["Tab 1", "Tab 2"])
-
-with tab1:
-    st.write("Content")
-
-with tab2:
-    st.write("Content")
 
 
 # ============================================================
