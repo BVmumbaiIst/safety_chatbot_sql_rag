@@ -408,16 +408,19 @@ if rag_enabled and LANGCHAIN_AVAILABLE:
                 st.exception(e)
                 gc.collect()
 
+st.markdown("## 📊 Safety Optimise Dashboard")
+
+tab_overview, = st.tabs(["🏠 Overview"])
 
 with tab_overview:
     st.header("🏠 Overview — All Templates")
 
-    sql = f"""
+    sql = f""
         SELECT "TemplateNames", COUNT(*) AS cnt
         FROM "{items_table_name}"
         GROUP BY "TemplateNames"
-        ORDER BY cnt DESC
-    """
+        ORDER BY cnt DESC 
+        ""
 
     df_overview = run_sql_query(DB_PATH_ITEMS, sql)
 
@@ -429,19 +432,20 @@ with tab_overview:
             x="TemplateNames",
             y="cnt",
             text="cnt",
-            title="Inspections by Template",
+            title="Inspections by Template"
         )
-        fig.update_layout(xaxis_title="Template", yaxis_title="Inspection Count")
         st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("---")
     st.subheader("💬 Chatbot — Global Overview")
 
-    st.info("Chatbot will answer questions across all templates.")
+tab1, tab2 = st.tabs(["Tab 1", "Tab 2"])
 
-st.markdown("## 📊 Safety Optimise Dashboard")
+with tab1:
+    st.write("Content")
 
-tab_overview = st.tabs(["🏠 Overview"])[0]
+with tab2:
+    st.write("Content")
 
 
 # ============================================================
