@@ -516,7 +516,7 @@ with col_left:
                     # ------------------------
                     # Build LLM analytical prompt (safe: kpi_text always defined)
                     # ------------------------
-                    kpi_text = f"Total Records: {total_records}\nTop Template: {top_template}\nTop Employee: {top_employee}"
+                    kpi_text = f"Total Records: {total_records}\nTop Template: {template_count}\nTop Employee: {employee_count}"
 
                     if llm:
                         task_prompt = f"""
