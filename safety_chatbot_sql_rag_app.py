@@ -505,7 +505,7 @@ with col_left:
                     if llm:
                         try:
                             preview_rows = df_for_analysis.head(5).to_dict(orient="records")
-                            prompt = f """You are an assistant. Preview rows: {json.dumps(preview_rows)}. Question: "{user_question}". Respond ONLY RELATED or UNRELATED."""
+                            prompt = f"""You are an assistant. Preview rows: {json.dumps(preview_rows)}. Question: "{user_question}". Respond ONLY RELATED or UNRELATED."""
                             out = llm.invoke(prompt).strip().upper()
                             relevance = "RELATED" in out
                         except Exception:
