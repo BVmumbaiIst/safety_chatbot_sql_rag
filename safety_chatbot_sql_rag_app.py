@@ -505,7 +505,9 @@ with col_left:
                     if llm:
                         try:
                             preview_rows = df_for_analysis.head(5).to_dict(orient="records")
-                            prompt = f"""You are an assistant. Preview rows: {json.dumps(preview_rows)}. Question: "{user_question}". Respond ONLY RELATED or UNRELATED."""
+                            prompt = f """
+                            You are an assistant. Preview rows: {json.dumps(preview_rows)}. Question: "{user_question}". Respond ONLY RELATED or UNRELATED.
+                            """
                             out = llm.invoke(prompt).strip().upper()
                             relevance = "RELATED" in out
                         except Exception:
@@ -562,28 +564,28 @@ Return a concise markdown-formatted report.
                         if "region" in df_viz.columns and "TemplateNames" in df_viz.columns:
                             region_count = df_viz.groupby("region")["TemplateNames"].count().reset_index(name="count")
                             fig = px.bar(region_count, x="region", y="count", text="count", color="region", color_discrete_sequence=vivid_colors, title="Inspections by Region")
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, width=stretch)
 
                         # Template distribution
                         if "TemplateNames" in df_viz.columns:
                             template_count = df_viz["TemplateNames"].value_counts().head(10).reset_index()
                             template_count.columns = ["TemplateNames", "count"]
                             fig = px.bar(template_count, x="TemplateNames", y="count", color="TemplateNames", text="count", title="Top 10 Templates by Inspection Count")
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, width=stretch)
 
                         # Employee distribution
                         if "owner name" in df_viz.columns:
                             emp_count = df_viz["owner name"].value_counts().head(10).reset_index()
                             emp_count.columns = ["owner name", "count"]
                             fig = px.bar(emp_count, x="owner name", y="count", color="owner name", text="count", title="Top 10 Employees by Inspection Count")
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, width=stretch)
 
                         # Assignee status pie
                         if "assignee status" in df_viz.columns:
                             status_count = df_viz["assignee status"].value_counts().reset_index()
                             status_count.columns = ["assignee status", "count"]
                             fig = px.pie(status_count, values="count", names="assignee status", title="Distribution of Assignee Status", color_discrete_sequence=px.colors.qualitative.Set3)
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, width=stretch)
 
                     except Exception as e:
                         st.warning(f"⚠️ Could not generate visuals automatically: {e}")
@@ -654,7 +656,7 @@ Return a concise markdown-formatted report.
                         text="count",
                         title="Top Templates (preview)",
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width=stretch)
             except Exception:
                 pass
         else:
