@@ -44,3 +44,4 @@ language-tool-python
 pydantic
 pydantic[email]
 streamlit-extras
+pip install --upgrade pip
