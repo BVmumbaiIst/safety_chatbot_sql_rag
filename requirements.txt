@@ -33,7 +33,8 @@ boto3
 duckdb
 beautifulsoup4
 grandalf
-altair
+altair>=5.0.0
+
 # Utilities
 python-dotenv
 language-tool-python
