@@ -28,7 +28,7 @@ plotly
 tabulate
 
 # Web & Streamlit
-streamlit
+pip install --upgrade streamlit
 boto3
 duckdb
 beautifulsoup4
