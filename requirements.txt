@@ -33,10 +33,10 @@ boto3
 duckdb
 beautifulsoup4
 grandalf
-python_version < 3.13
+python_version
 
-streamlit==1.29.0
-altair==4.2.2
+streamlit
+altair
 
 # Utilities
 python-dotenv
