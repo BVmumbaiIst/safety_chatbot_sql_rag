@@ -12,7 +12,7 @@ openai
 tiktoken
 
 # Vector / RAG
-faiss-cpu
+faiss-cpu==1.13.2
 sentence-transformers
 
 # LLM + SQL
@@ -30,12 +30,13 @@ tabulate
 
 # Web / UI
 streamlit>=1.31,<1.36
-altair==4.2.2
 streamlit-extras
+altair==4.2.2
 
 
 # AWS
 boto3
+botocore
 
 # Utilities
 python-dotenv
