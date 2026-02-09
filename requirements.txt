@@ -1,46 +1,51 @@
-# LangChain Core
-langchain-core
-langchain-community
-langchain-openai
-langchain-experimental
-langchain-text-splitters
-langchain-chroma
-langchain-classic
-
-# OpenAI
-openai
-tiktoken
-
-# Vector / RAG
-faiss-cpu==1.13.2
-sentence-transformers
-
-# LLM + SQL
-sqlalchemy
-pandasql
-duckdb
-
-# Data & ML
-numpy
-pandas
-scikit-learn
-matplotlib
-plotly
-tabulate
-
-# Web / UI
-streamlit>=1.31,<1.36
-streamlit-extras
+# -----------------------------
+# Streamlit UI
+# -----------------------------
+streamlit==1.35.0
+streamlit-extras==0.4.0
 altair==4.2.2
 
+# -----------------------------
+# LangChain ecosystem
+# -----------------------------
+langchain-core==0.2.43
+langchain-community==0.2.18
+langchain-openai==0.1.25
+langchain-text-splitters==0.2.4
 
+# -----------------------------
+# OpenAI
+# -----------------------------
+openai==1.55.3
+tiktoken==0.8.0
+
+# -----------------------------
+# Vector store
+# -----------------------------
+faiss-cpu==1.13.2
+
+# -----------------------------
+# Data stack
+# -----------------------------
+pandas==2.2.3
+numpy==1.26.4
+sqlalchemy==2.0.36
+duckdb==1.1.3
+
+# -----------------------------
+# Visualization
+# -----------------------------
+plotly==5.24.1
+
+# -----------------------------
 # AWS
-boto3
-botocore
+# -----------------------------
+boto3==1.35.54
+botocore==1.35.54
 
+# -----------------------------
 # Utilities
-python-dotenv
-language-tool-python
-pydantic
-pydantic[email]
-grandalf
+# -----------------------------
+python-dotenv==1.0.1
+pydantic==2.9.2
+grandalf==0.8
