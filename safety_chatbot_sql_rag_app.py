@@ -256,19 +256,45 @@ def build_where_clause(selected_filters, date_range_tuple=None):
         filters.append(f'"date completed" BETWEEN "{start}" AND "{end}"')
     return " AND ".join(filters) if filters else "1=1"
 
+# -------------------------------------------------
+# Initialize session state safely
+# -------------------------------------------------
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+if "email" not in st.session_state:
+    st.session_state["email"] = None
+
+
 # ============================================================
 # Sidebar: login and filters (use metadata to populate options)
 # ============================================================
 with st.sidebar:
     st.header("🔑 Login")
-    entered_email = st.text_input("Enter your Email", key="login_email")
+
+    entered_email = st.text_input(
+        "Enter your Email",
+        key="login_email"
+    )
+
     if st.button("Login"):
-        emails_list = users_meta["distincts"].get("email", [])
-        if entered_email:
+
+        if not entered_email:
+            st.warning("Please enter an email.")
+        else:
+            # normalize input
+            entered_email = entered_email.strip().lower()
+
+            emails_list = [
+                e.strip().lower()
+                for e in users_meta["distincts"].get("email", [])
+            ]
+
             if entered_email in emails_list:
                 st.session_state["logged_in"] = True
                 st.session_state["email"] = entered_email
                 st.success(f"✅ Logged in as: {entered_email}")
+                st.rerun()   # 🔥 force immediate rerun
             else:
                 st.session_state["logged_in"] = False
                 st.error("❌ Access denied. Email not found.")
