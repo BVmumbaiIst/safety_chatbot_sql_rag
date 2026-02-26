@@ -236,7 +236,8 @@ with st.sidebar:
                     FROM "{users_meta['table']}"
                     WHERE LOWER(email) = ?
                     LIMIT 1;
-                """
+                    """
+                    
                 result = pd.read_sql(query, conn, params=[email_input])
 
             if not result.empty:
