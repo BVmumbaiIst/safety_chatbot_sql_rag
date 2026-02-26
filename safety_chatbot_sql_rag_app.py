@@ -188,8 +188,26 @@ def load_db_metadata(db_path, table_hint=None):
     conn = sqlite3.connect(db_path, timeout=10)
     try:
         # detect first table
-        tbl_df = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1;", conn)
-        table_name = tbl_df.iloc[0, 0] if not tbl_df.empty else (table_hint or "")
+        tbl_df = pd.read_sql(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
+            conn
+        )
+        
+        if tbl_df.empty:
+            raise RuntimeError("No valid user tables found.")
+        
+        # If multiple tables, prefer one that contains 'user'
+        candidates = tbl_df["name"].tolist()
+        
+        table_name = None
+        for t in candidates:
+            if "user" in t.lower():
+                table_name = t
+                break
+        
+        if not table_name:
+            table_name = candidates[0]
+
         meta = {}
         try:
             meta_df = pd.read_sql(f'SELECT MIN("date completed") as date_min, MAX("date completed") as date_max FROM "{table_name}";', conn)
@@ -285,19 +303,30 @@ with st.sidebar:
             # normalize input
             entered_email = entered_email.strip().lower()
 
-            emails_list = [
-                e.strip().lower()
-                for e in users_meta["distincts"].get("email", [])
-            ]
-
-            if entered_email in emails_list:
+            with sqlite3.connect(DB_PATH_USERS) as conn:
+            
+                query = f"""
+                SELECT 1
+                FROM "{users_meta['table']}"
+                WHERE LOWER(email) = ?
+                LIMIT 1;
+                """
+            
+                result = pd.read_sql(
+                    query,
+                    conn,
+                    params=[entered_email]
+                )
+            
+            if not result.empty:
                 st.session_state["logged_in"] = True
                 st.session_state["email"] = entered_email
                 st.success(f"✅ Logged in as: {entered_email}")
-                st.rerun()   # 🔥 force immediate rerun
+                st.rerun()
             else:
                 st.session_state["logged_in"] = False
                 st.error("❌ Access denied. Email not found.")
+
 
 
 # require login to proceed
