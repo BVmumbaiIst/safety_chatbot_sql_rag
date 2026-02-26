@@ -296,6 +296,26 @@ selected_filters = {
     "assignee status": statuses,
     "employee status": employee_status
 }
+def sql_list(values):
+    safe = [str(v).replace("'", "''") for v in values]
+    return ",".join([f"'{s}'" for s in safe])
+
+
+def build_where_clause(selected_filters, date_range_tuple=None):
+
+    filters = []
+
+    for col, vals in selected_filters.items():
+        if vals:
+            filters.append(f'"{col}" IN ({sql_list(vals)})')
+
+    if date_range_tuple and isinstance(date_range_tuple, (list, tuple)) and len(date_range_tuple) == 2:
+        start = pd.to_datetime(date_range_tuple[0]).strftime("%Y-%m-%d")
+        end = pd.to_datetime(date_range_tuple[1]).strftime("%Y-%m-%d")
+        filters.append(f'"date completed" BETWEEN "{start}" AND "{end}"')
+
+    return " AND ".join(filters) if filters else "1=1"
+
 where_clause = build_where_clause(selected_filters, date_range_tuple=date_range)
 items_table_name = items_meta["table"]
 default_query = f'SELECT * FROM "{items_table_name}" WHERE {where_clause} ;'
