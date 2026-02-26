@@ -207,6 +207,24 @@ items_meta = load_db_metadata(DB_PATH_ITEMS)
 users_meta = load_db_metadata(DB_PATH_USERS)
 
 # ============================================================
+# LLM setup (cached). If OPENAI_API_KEY missing, llm will be None
+# ============================================================
+@st.cache_resource(show_spinner=False)
+def setup_llm():
+    if not OPENAI_API_KEY:
+        return None
+    try:
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=OPENAI_API_KEY)
+        return llm
+    except Exception:
+        return None
+
+llm = setup_llm()
+if llm is None:
+    st.info("⚠️ No OpenAI API key found or LLM init failed. LLM features will be disabled.")
+
+
+# ============================================================
 # SESSION STATE INIT
 # ============================================================
 if "logged_in" not in st.session_state:
