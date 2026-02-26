@@ -298,8 +298,7 @@ with st.sidebar:
             else:
                 st.session_state["logged_in"] = False
                 st.error("❌ Access denied. Email not found.")
-        else:
-            st.warning("Please enter an email.")
+
 
 # require login to proceed
 if not st.session_state.get("logged_in", False):
