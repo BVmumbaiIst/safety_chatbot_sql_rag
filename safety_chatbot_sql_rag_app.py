@@ -54,326 +54,236 @@ st.set_page_config(page_title="💬 Safety Chatbot (SQL + Optional RAG)", layout
 st.title("💬 Safety Chatbot — SQL + Optional RAG (Memory-Optimized)")
 
 # ============================================================
-# Load environment and keys
+# LOAD ENV
 # ============================================================
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# AWS S3 config (if you store DBs in S3)
+# ============================================================
+# S3 CONFIG
+# ============================================================
 BUCKET_NAME = "iauditorsafetydata"
+
 S3_KEYS = {
     "items": "BVPI_Safety_Optimise/safety_Chat_bot_db/inspection_employee_schedule_items.db",
     "users": "BVPI_Safety_Optimise/safety_Chat_bot_db/inspection_employee_schedule_users.db"
 }
 
-# Create S3 client once (will use env credentials if set)
 s3 = boto3.client("s3")
 
 # ============================================================
-# Helper: cleanup old temp DBs (>24 hours) and register atexit
+# CLEAN OLD TEMP FILES
 # ============================================================
 def cleanup_old_dbs(tmp_dir=tempfile.gettempdir(), hours=24):
     cutoff = time.time() - hours * 3600
-    removed = 0
     for file in os.listdir(tmp_dir):
         if file.endswith(".db"):
             path = os.path.join(tmp_dir, file)
             try:
                 if os.path.getmtime(path) < cutoff:
                     os.remove(path)
-                    removed += 1
-            except Exception:
+            except:
                 pass
-    if removed:
-        st.info(f"Cleaned up {removed} old temp .db files from {tmp_dir}")
 
-# run immediately (Streamlit reruns will call this often but it's cheap)
 cleanup_old_dbs()
 atexit.register(lambda: cleanup_old_dbs())
 
 # ============================================================
-# S3 helper: download DB if not present locally & validate
-# (if you keep DBs in S3). If you store DBs in repo, adapt accordingly.
+# DOWNLOAD SQLITE FROM S3 (SAFE)
 # ============================================================
-def load_sqlite_from_s3_cached(s3_key: str):
-    """
-    Download an S3 object to /tmp if not present already.
-    Returns local path to .db
-    """
-    base_name = os.path.basename(s3_key).replace("/", "_")
-    local_path = os.path.join(tempfile.gettempdir(), base_name)
+def load_sqlite_from_s3(s3_key: str):
 
-    # if exists and appears valid, reuse
+    filename = os.path.basename(s3_key)
+    local_path = os.path.join(tempfile.gettempdir(), filename)
+
     if os.path.exists(local_path) and os.path.getsize(local_path) > 1024:
         return local_path
 
-    # Attempt download
     try:
         s3.download_file(BUCKET_NAME, s3_key, local_path)
     except Exception as e:
-        raise RuntimeError(f"Failed to download {s3_key} from S3: {e}")
+        raise RuntimeError(f"S3 download failed: {e}")
 
-    # Validate quickly
+    # Validate DB
     try:
         conn = sqlite3.connect(local_path)
-        tables = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table';", conn)
+        tables = pd.read_sql(
+            "SELECT name FROM sqlite_master WHERE type='table';",
+            conn
+        )
         conn.close()
-        if tables.empty:
-            raise RuntimeError(f"No tables found in downloaded DB: {local_path}")
-    except Exception as e:
-        # remove broken file
-        try:
-            os.remove(local_path)
-        except Exception:
-            pass
-        raise RuntimeError(f"Downloaded DB validation failed: {e}")
 
-    # ensure cleanup on exit
-    atexit.register(lambda: os.path.exists(local_path) and os.remove(local_path))
+        if tables.empty:
+            raise RuntimeError("Downloaded DB has no tables")
+
+    except Exception as e:
+        os.remove(local_path)
+        raise RuntimeError(f"DB validation failed: {e}")
+
     return local_path
 
-# ============================================================
-# Cached: Get DB local paths (from S3)
-# ============================================================
-@st.cache_resource(show_spinner=False)
+
+@st.cache_resource
 def get_db_paths():
-    """
-    Returns tuple (items_db_path, users_db_path)
-    If S3 is unavailable this raises.
-    """
-    items_path = load_sqlite_from_s3_cached(S3_KEYS["items"])
-    users_path = load_sqlite_from_s3_cached(S3_KEYS["users"])
+    items_path = load_sqlite_from_s3(S3_KEYS["items"])
+    users_path = load_sqlite_from_s3(S3_KEYS["users"])
     return items_path, users_path
 
-# Try to load paths now; if fails, stop the app gracefully
+
 try:
     DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
 except Exception as e:
-    st.error("❌ Could not load database files from S3 or local path.")
+    st.error("❌ Failed to load DB from S3")
     st.exception(e)
     st.stop()
 
 # ============================================================
-# Utility functions: DB connections & quick SQL run
+# SAFE SQL EXECUTION
 # ============================================================
-def get_connection_items():
-    return sqlite3.connect(DB_PATH_ITEMS)
-
-def get_connection_users():
-    return sqlite3.connect(DB_PATH_USERS)
-
 def run_sql_query(db_path, sql, params=None, limit_rows=None):
     conn = sqlite3.connect(db_path, timeout=10)
     try:
         if limit_rows:
-            # naive wrapper: add LIMIT if not present (safe only for our controlled queries)
-            sql_l = sql.rstrip().rstrip(";")
-            sql_l = f"{sql_l} LIMIT {limit_rows};"
-            df = pd.read_sql(sql_l, conn, params=params)
-        else:
-            df = pd.read_sql(sql, conn, params=params)
+            sql = sql.rstrip().rstrip(";")
+            sql = f"{sql} LIMIT {limit_rows};"
+        df = pd.read_sql(sql, conn, params=params)
         return df
     finally:
         conn.close()
 
 # ============================================================
-# Metadata loader (small queries only) - cached
+# LOAD METADATA SAFELY
 # ============================================================
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_db_metadata(db_path, table_hint=None):
-    """
-    Loads small metadata (min/max dates and distinct values for filters)
-    Returns dict with keys: table, date_min, date_max, distincts
-    """
-    conn = sqlite3.connect(db_path, timeout=10)
+@st.cache_data(ttl=3600)
+def load_db_metadata(db_path):
+
+    conn = sqlite3.connect(db_path)
     try:
-        # detect first table
-        tbl_df = pd.read_sql(
+        tables = pd.read_sql(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
             conn
         )
-        
-        if tbl_df.empty:
-            raise RuntimeError("No valid user tables found.")
-        
-        # If multiple tables, prefer one that contains 'user'
-        candidates = tbl_df["name"].tolist()
-        
-        table_name = None
-        for t in candidates:
-            if "user" in t.lower():
-                table_name = t
-                break
-        
-        if not table_name:
-            table_name = candidates[0]
 
-        meta = {}
+        if tables.empty:
+            raise RuntimeError("No valid tables found")
+
+        table_name = tables.iloc[0]["name"]
+
+        # Date range
         try:
-            meta_df = pd.read_sql(f'SELECT MIN("date completed") as date_min, MAX("date completed") as date_max FROM "{table_name}";', conn)
-            meta["date_min"] = meta_df["date_min"].iloc[0] if not meta_df.empty else None
-            meta["date_max"] = meta_df["date_max"].iloc[0] if not meta_df.empty else None
-        except Exception:
-            meta["date_min"], meta["date_max"] = None, None
+            meta_df = pd.read_sql(
+                f'SELECT MIN("date completed") as min_d, MAX("date completed") as max_d FROM "{table_name}";',
+                conn
+            )
+            date_min = meta_df["min_d"].iloc[0]
+            date_max = meta_df["max_d"].iloc[0]
+        except:
+            date_min, date_max = None, None
 
+        # Distinct values
         distincts = {}
-        # columns we want to use as filters (tunable)
         cols = ["region", "TemplateNames", "owner name", "assignee status", "employee status", "email"]
-        for c in cols:
+
+        for col in cols:
             try:
-                q = f'SELECT DISTINCT "{c}" as val FROM "{table_name}" WHERE "{c}" IS NOT NULL LIMIT 2000;'
+                q = f'SELECT DISTINCT "{col}" as val FROM "{table_name}" WHERE "{col}" IS NOT NULL LIMIT 2000;'
                 vals = pd.read_sql(q, conn)["val"].dropna().tolist()
-                distincts[c] = sorted(vals)
-            except Exception:
-                distincts[c] = []
-        return {"table": table_name, "meta": meta, "distincts": distincts}
+                distincts[col] = sorted(vals)
+            except:
+                distincts[col] = []
+
+        return {
+            "table": table_name,
+            "date_min": date_min,
+            "date_max": date_max,
+            "distincts": distincts
+        }
+
     finally:
         conn.close()
 
-# load metadata for items and users
+
 items_meta = load_db_metadata(DB_PATH_ITEMS)
 users_meta = load_db_metadata(DB_PATH_USERS)
 
 # ============================================================
-# LLM setup (cached). If OPENAI_API_KEY missing, llm will be None
+# SESSION STATE INIT
 # ============================================================
-@st.cache_resource(show_spinner=False)
-def setup_llm():
-    if not OPENAI_API_KEY:
-        return None
-    try:
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=OPENAI_API_KEY)
-        return llm
-    except Exception:
-        return None
-
-llm = setup_llm()
-if llm is None:
-    st.info("⚠️ No OpenAI API key found or LLM init failed. LLM features will be disabled.")
-
-# ============================================================
-# Safe helpers for building SQL strings
-# ============================================================
-def sql_list(values):
-    """Escape single quotes and return SQL IN formatted string"""
-    safe = [str(v).replace("'", "''") for v in values]
-    return ",".join([f"'{s}'" for s in safe])
-
-def build_where_clause(selected_filters, date_range_tuple=None):
-    """
-    selected_filters: dict with keys mapping to SQL column names and list of values
-    date_range_tuple: (start_date, end_date) or None
-    """
-    filters = []
-    for col, vals in selected_filters.items():
-        if vals:
-            filters.append(f'"{col}" IN ({sql_list(vals)})')
-    if date_range_tuple:
-        start = pd.to_datetime(date_range_tuple[0]).strftime("%Y-%m-%d")
-        end = pd.to_datetime(date_range_tuple[1]).strftime("%Y-%m-%d")
-        filters.append(f'"date completed" BETWEEN "{start}" AND "{end}"')
-    return " AND ".join(filters) if filters else "1=1"
-
-# -------------------------------------------------
-# Initialize session state safely
-# -------------------------------------------------
 if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
+    st.session_state.logged_in = False
 
 if "email" not in st.session_state:
-    st.session_state["email"] = None
-
+    st.session_state.email = None
 
 # ============================================================
-# Sidebar: login and filters (use metadata to populate options)
+# LOGIN (DIRECT DB VALIDATION)
 # ============================================================
 with st.sidebar:
     st.header("🔑 Login")
 
-    entered_email = st.text_input(
-        "Enter your Email",
-        key="login_email"
-    )
+    email_input = st.text_input("Enter your Email")
 
     if st.button("Login"):
 
-        if not entered_email:
-            st.warning("Please enter an email.")
+        if not email_input:
+            st.warning("Enter email")
         else:
-            # normalize input
-            entered_email = entered_email.strip().lower()
+            email_input = email_input.strip().lower()
 
             with sqlite3.connect(DB_PATH_USERS) as conn:
-            
                 query = f"""
-                SELECT 1
-                FROM "{users_meta['table']}"
-                WHERE LOWER(email) = ?
-                LIMIT 1;
+                    SELECT 1
+                    FROM "{users_meta['table']}"
+                    WHERE LOWER(email) = ?
+                    LIMIT 1;
                 """
-            
-                result = pd.read_sql(
-                    query,
-                    conn,
-                    params=[entered_email]
-                )
-            
+                result = pd.read_sql(query, conn, params=[email_input])
+
             if not result.empty:
-                st.session_state["logged_in"] = True
-                st.session_state["email"] = entered_email
-                st.success(f"✅ Logged in as: {entered_email}")
+                st.session_state.logged_in = True
+                st.session_state.email = email_input
+                st.success("✅ Login successful")
                 st.rerun()
             else:
-                st.session_state["logged_in"] = False
-                st.error("❌ Access denied. Email not found.")
+                st.error("❌ Access denied")
 
-
-
-# require login to proceed
-if not st.session_state.get("logged_in", False):
-    st.warning("🔒 Please log in to access filters and data.")
+# Require login
+if not st.session_state.logged_in:
+    st.warning("🔒 Please login to continue.")
     st.stop()
 
-st.sidebar.header("🔎 Filters (use Run Query to apply)")
-# date inputs robust handling
-date_min = items_meta["meta"].get("date_min")
-date_max = items_meta["meta"].get("date_max")
+# ============================================================
+# FILTERS
+# ============================================================
+st.sidebar.header("🔎 Filters")
 
-if date_min is not None and date_max is not None:
-    try:
-        default_dates = [pd.to_datetime(date_min).date(), pd.to_datetime(date_max).date()]
-    except Exception:
-        default_dates = None
+date_min = items_meta["date_min"]
+date_max = items_meta["date_max"]
+
+if date_min and date_max:
+    date_range = st.sidebar.date_input(
+        "Date Range",
+        value=[
+            pd.to_datetime(date_min).date(),
+            pd.to_datetime(date_max).date()
+        ]
+    )
 else:
-    default_dates = None
+    date_range = None
 
-date_range = st.sidebar.date_input(
-    "Select Date Range",
-    value=default_dates,
-    min_value=pd.to_datetime(date_min).date() if date_min is not None else None,
-    max_value=pd.to_datetime(date_max).date() if date_max is not None else None
+regions = st.sidebar.multiselect("Region", items_meta["distincts"]["region"])
+templates = st.sidebar.multiselect("Template", items_meta["distincts"]["TemplateNames"])
+employees = st.sidebar.multiselect("Owner", items_meta["distincts"]["owner name"])
+statuses = st.sidebar.multiselect("Assignee Status", items_meta["distincts"]["assignee status"])
+employee_status = st.sidebar.multiselect("Employee Status", items_meta["distincts"]["employee status"])
+
+row_limit = st.sidebar.slider(
+    "Preview Row Limit",
+    10,
+    5000,
+    500
 )
 
-# normalize date_range
-if isinstance(date_range, (list, tuple)):
-    if len(date_range) == 0:
-        date_range = None
-    elif len(date_range) == 1:
-        date_range = (date_range[0], date_range[0])
-else:
-    # single date returned sometimes - convert to tuple
-    try:
-        date_range = (date_range, date_range)
-    except Exception:
-        date_range = None
-
-# filter pickers use limited distinct lists already loaded
-regions = st.sidebar.multiselect("Select Regions", items_meta["distincts"].get("region", []))
-templates = st.sidebar.multiselect("Select Templates", items_meta["distincts"].get("TemplateNames", []))
-employees = st.sidebar.multiselect("Select Employees (owner name)", items_meta["distincts"].get("owner name", []))
-statuses = st.sidebar.multiselect("Select Assignee Status", items_meta["distincts"].get("assignee status", []))
-employee_status = st.sidebar.multiselect("Select Employee Status", items_meta["distincts"].get("employee status", []))
-row_limit = st.sidebar.slider("Limit rows to preview (saves memory)", min_value=10, max_value=5000, value=500, step=10)
 
 # ============================================================
 # Build SQL query (but do NOT run it automatically)
