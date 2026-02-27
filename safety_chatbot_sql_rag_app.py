@@ -96,8 +96,9 @@ def load_sqlite_from_s3(s3_key: str):
     filename = os.path.basename(s3_key)
     local_path = os.path.join(tempfile.gettempdir(), filename)
 
-    if os.path.exists(local_path) and os.path.getsize(local_path) > 1024:
-        return local_path
+    # Always redownload fresh (avoid corrupted reuse)
+    if os.path.exists(local_path):
+        os.remove(local_path)
 
     try:
         s3.download_file(BUCKET_NAME, s3_key, local_path)
@@ -117,7 +118,8 @@ def load_sqlite_from_s3(s3_key: str):
             raise RuntimeError("Downloaded DB has no tables")
 
     except Exception as e:
-        os.remove(local_path)
+        if os.path.exists(local_path):
+            os.remove(local_path)
         raise RuntimeError(f"DB validation failed: {e}")
 
     return local_path
