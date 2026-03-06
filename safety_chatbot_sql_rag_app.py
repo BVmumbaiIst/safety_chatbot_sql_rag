@@ -297,8 +297,8 @@ if not st.session_state.logged_in:
 # ============================================================
 st.sidebar.header("🔎 Filters")
 
-date_min = items_meta["date_min"].get("date_min")
-date_max = items_meta["date_max"].get("date_max")
+date_min = items_meta["meta"].get("date_min")
+date_max = items_meta["meta"].get("date_max")
 
 if date_min and date_max:
     date_range = st.sidebar.date_input(
