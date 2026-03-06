@@ -215,7 +215,7 @@ def load_db_metadata(db_path, s3_key=None):
         except Exception:
             pass
 
-        new_path = load_sqlite_from_s3_cached(s3_key)
+        new_path = load_sqlite_from_s3(s3_key)
 
         meta = _read_metadata(new_path)
 
