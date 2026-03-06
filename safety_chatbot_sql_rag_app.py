@@ -149,57 +149,83 @@ def run_sql_query(db_path, sql, params=None, limit_rows=None):
 # ============================================================
 # LOAD METADATA SAFELY
 # ============================================================
-@st.cache_data(ttl=3600)
-def load_db_metadata(db_path):
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_db_metadata(db_path, s3_key=None):
 
-    conn = sqlite3.connect(db_path)
-    try:
-        tables = pd.read_sql(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
-            conn
-        )
-
-        if tables.empty:
-            raise RuntimeError("No valid tables found")
-
-        table_name = tables.iloc[0]["name"]
-
-        # Date range
+    def _read_metadata(path):
+        conn = sqlite3.connect(path)
         try:
-            meta_df = pd.read_sql(
-                f'SELECT MIN("date completed") as min_d, MAX("date completed") as max_d FROM "{table_name}";',
+            tables = pd.read_sql(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
                 conn
             )
-            date_min = meta_df["min_d"].iloc[0]
-            date_max = meta_df["max_d"].iloc[0]
-        except:
-            date_min, date_max = None, None
 
-        # Distinct values
-        distincts = {}
-        cols = ["region", "TemplateNames", "owner name", "assignee status", "employee status", "email"]
+            if tables.empty:
+                return None
 
-        for col in cols:
+            table_name = tables.iloc[0]["name"]
+
             try:
-                q = f'SELECT DISTINCT "{col}" as val FROM "{table_name}" WHERE "{col}" IS NOT NULL LIMIT 2000;'
-                vals = pd.read_sql(q, conn)["val"].dropna().tolist()
-                distincts[col] = sorted(vals)
-            except:
-                distincts[col] = []
+                meta_df = pd.read_sql(
+                    f'SELECT MIN("date completed") as date_min, MAX("date completed") as date_max FROM "{table_name}";',
+                    conn
+                )
+                date_min = meta_df["date_min"].iloc[0]
+                date_max = meta_df["date_max"].iloc[0]
+            except Exception:
+                date_min, date_max = None, None
 
-        return {
-            "table": table_name,
-            "date_min": date_min,
-            "date_max": date_max,
-            "distincts": distincts
-        }
+            distincts = {}
+            cols = [
+                "region",
+                "TemplateNames",
+                "owner name",
+                "assignee status",
+                "employee status",
+                "email",
+            ]
 
-    finally:
-        conn.close()
+            for c in cols:
+                try:
+                    q = f'SELECT DISTINCT "{c}" as val FROM "{table_name}" WHERE "{c}" IS NOT NULL LIMIT 2000;'
+                    vals = pd.read_sql(q, conn)["val"].dropna().tolist()
+                    distincts[c] = sorted(vals)
+                except Exception:
+                    distincts[c] = []
 
+            return {
+                "table": table_name,
+                "meta": {"date_min": date_min, "date_max": date_max},
+                "distincts": distincts,
+            }
 
-items_meta = load_db_metadata(DB_PATH_ITEMS)
-users_meta = load_db_metadata(DB_PATH_USERS)
+        finally:
+            conn.close()
+
+    # Try reading metadata
+    meta = _read_metadata(db_path)
+
+    if meta is not None:
+        return meta
+
+    # If DB corrupted or empty → redownload
+    if s3_key:
+        try:
+            os.remove(db_path)
+        except Exception:
+            pass
+
+        new_path = load_sqlite_from_s3_cached(s3_key)
+
+        meta = _read_metadata(new_path)
+
+        if meta is not None:
+            return meta
+
+    raise RuntimeError("Database could not be loaded or contains no tables")
+
+items_meta = load_db_metadata(DB_PATH_ITEMS, S3_KEYS["items"])
+users_meta = load_db_metadata(DB_PATH_USERS, S3_KEYS["users"])
 
 # ============================================================
 # LLM setup (cached). If OPENAI_API_KEY missing, llm will be None
