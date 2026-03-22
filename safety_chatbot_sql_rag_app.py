@@ -1,15 +1,3 @@
-# """
-# safety_chatbot_sql_rag_app.py
-# Corrected, memory-optimized Streamlit app for Safety Culture Chatbot (SQL + optional RAG)
-
-# Features:
-# - Lazy DB metadata load (no full table in memory at startup)
-# - On-demand SQL queries when user clicks "Run Query"
-# - Optional RAG (FAISS) built only when requested and limited in size
-# - Cached LLM initialization (ChatOpenAI) with fallback if no API key
-# - Safe SQL IN formatting and robust date handling
-# - Temp DB cleanup and resource-friendly behavior for Streamlit Cloud
-# """
 
 
 import streamlit as st
