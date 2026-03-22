@@ -284,6 +284,9 @@ if llm is None:
 # ============================================================
 # LOGIN (DIRECT DB VALIDATION)
 # ============================================================
+# ============================================================
+# LOGIN (FIXED)
+# ============================================================
 with st.sidebar:
     st.header("🔑 Login")
 
@@ -306,24 +309,26 @@ with st.sidebar:
                 )
 
                 conn.close()
-                    
-                result = pd.read_sql(query, conn, params=[email_input])
 
                 if not result.empty:
                     st.session_state.logged_in = True
                     st.session_state.email = email_input
+                    st.session_state.db_loaded = False
                     st.success("✅ Login successful")
                     st.experimental_rerun()
                 else:
                     st.error("❌ Access denied")
-                    
+
+            except Exception as e:
+                st.error("❌ Login failed")
+                st.exception(e)
 # ============================================================
 # STOP IF NOT LOGGED IN
 # ============================================================
-# Require login
 if not st.session_state.logged_in:
     st.warning("🔒 Please login to continue.")
     st.stop()
+
 # ============================================================
 # LAZY LOAD DB AFTER LOGIN
 # ============================================================
@@ -338,7 +343,7 @@ if not st.session_state.db_loaded:
         st.session_state.items_meta = items_meta
         st.session_state.db_loaded = True
 
-# reuse from session
+# reuse
 DB_PATH_ITEMS = st.session_state.DB_PATH_ITEMS
 items_meta = st.session_state.items_meta
 
