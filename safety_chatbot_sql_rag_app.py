@@ -1,11 +1,3 @@
-import streamlit as st
-# ============================================================
-# Basic page config - must be set before ANY st.* call
-# ============================================================
-st.set_page_config(page_title="💬 Safety Chatbot (SQL + Optional RAG)", layout="wide")
-
-
-
 """
 safety_chatbot_sql_rag_app.py
 Corrected, memory-optimized Streamlit app for Safety Culture Chatbot (SQL + optional RAG)
@@ -18,6 +10,13 @@ Features:
 - Safe SQL IN formatting and robust date handling
 - Temp DB cleanup and resource-friendly behavior for Streamlit Cloud
 """
+
+
+import streamlit as st
+# ============================================================
+# Basic page config - must be set before ANY st.* call
+# ============================================================
+st.set_page_config(page_title="💬 Safety Chatbot (SQL + Optional RAG)", layout="wide")
 
 import os
 import sqlite3
