@@ -207,8 +207,6 @@ def load_db_metadata(db_path, s3_key=None):
 
     raise RuntimeError("Database could not be loaded or contains no tables")
 
-items_meta = load_db_metadata(DB_PATH_ITEMS, S3_KEYS["items"])
-users_meta = load_db_metadata(DB_PATH_USERS, S3_KEYS["users"])
 
 
 # ============================================================
@@ -280,10 +278,6 @@ if llm is None:
     st.info("⚠️ No OpenAI API key found or LLM init failed. LLM features will be disabled.")
 
 
-
-# ============================================================
-# LOGIN (DIRECT DB VALIDATION)
-# ============================================================
 # ============================================================
 # LOGIN (FIXED)
 # ============================================================
