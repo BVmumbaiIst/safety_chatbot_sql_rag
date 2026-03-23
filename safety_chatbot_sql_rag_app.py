@@ -215,9 +215,9 @@ def load_db_metadata(db_path, table_hint=None):
     finally:
         conn.close()
 
-# load metadata for items and users
-items_meta = load_db_metadata(DB_PATH_ITEMS)
-users_meta = load_db_metadata(DB_PATH_USERS)
+# # load metadata for items and users
+# items_meta = load_db_metadata(DB_PATH_ITEMS)
+# users_meta = load_db_metadata(DB_PATH_USERS)
 
 # ============================================================
 # LLM setup (cached). If OPENAI_API_KEY missing, llm will be None
