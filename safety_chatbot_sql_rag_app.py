@@ -215,9 +215,9 @@ def load_db_metadata(db_path, table_hint=None):
     finally:
         conn.close()
 
-# # load metadata for items and users
-# items_meta = load_db_metadata(DB_PATH_ITEMS)
-# users_meta = load_db_metadata(DB_PATH_USERS)
+# load metadata for items and users
+items_meta = load_db_metadata(DB_PATH_ITEMS)
+users_meta = load_db_metadata(DB_PATH_USERS)
 
 # ============================================================
 # LLM setup (cached). If OPENAI_API_KEY missing, llm will be None
@@ -264,23 +264,43 @@ def build_where_clause(selected_filters, date_range_tuple=None):
 # ============================================================
 with st.sidebar:
     st.header("🔑 Login")
-    entered_email = st.text_input("Enter your Email", key="login_email")
-    if st.button("Login"):
-        emails_list = users_meta["distincts"].get("email", [])
-        if entered_email:
-            if entered_email in emails_list:
-                st.session_state["logged_in"] = True
-                st.session_state["email"] = entered_email
-                st.success(f"✅ Logged in as: {entered_email}")
-            else:
-                st.session_state["logged_in"] = False
-                st.error("❌ Access denied. Email not found.")
-        else:
-            st.warning("Please enter an email.")
 
-# require login to proceed
-if not st.session_state.get("logged_in", False):
-    st.warning("🔒 Please log in to access filters and data.")
+    email_input = st.text_input("Enter your Email")
+
+    if st.button("Login"):
+
+        if not email_input:
+            st.warning("Enter email")
+        else:
+            try:
+                DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
+
+                conn = sqlite3.connect(DB_PATH_USERS)
+
+                result = pd.read_sql(
+                    'SELECT 1 FROM users WHERE LOWER(email)=?',
+                    conn,
+                    params=[email_input.lower()]
+                )
+
+                conn.close()
+
+                if not result.empty:
+                    st.session_state.logged_in = True
+                    st.session_state.email = email_input
+                    st.session_state.db_loaded = False
+                    st.success("✅ Login successful")
+                    st.experimental_rerun()
+                else:
+                    st.error("❌ Access denied")
+
+            except Exception as e:
+                st.error("❌ Login failed")
+                st.exception(e)
+
+# Require login
+if not st.session_state.logged_in:
+    st.warning("🔒 Please login to continue.")
     st.stop()
 
 st.sidebar.header("🔎 Filters (use Run Query to apply)")
