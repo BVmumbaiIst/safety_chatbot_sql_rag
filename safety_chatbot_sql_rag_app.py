@@ -6,20 +6,6 @@ import streamlit as st
 st.set_page_config(page_title="💬 Safety Chatbot (SQL + Optional RAG)", layout="wide")
 st.title("💬 Safety Chatbot — SQL + Optional RAG (Memory-Optimized)")
 
-
-"""
-safety_chatbot_sql_rag_app.py
-Corrected, memory-optimized Streamlit app for Safety Culture Chatbot (SQL + optional RAG)
-
-Features:
-- Lazy DB metadata load (no full table in memory at startup)
-- On-demand SQL queries when user clicks "Run Query"
-- Optional RAG (FAISS) built only when requested and limited in size
-- Cached LLM initialization (ChatOpenAI) with fallback if no API key
-- Safe SQL IN formatting and robust date handling
-- Temp DB cleanup and resource-friendly behavior for Streamlit Cloud
-"""
-
 import os
 import sqlite3
 import tempfile
@@ -56,6 +42,11 @@ except Exception:
 import plotly.express as px
 from streamlit_extras.metric_cards import style_metric_cards
 
+# ============================================================
+# TITLE
+# ============================================================
+
+st.title("💬 Safety Chatbot — SQL + Optional RAG (Memory-Optimized)")
 
 # ============================================================
 # LOAD ENV
