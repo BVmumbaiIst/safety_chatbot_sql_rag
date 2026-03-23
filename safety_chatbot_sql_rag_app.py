@@ -49,6 +49,18 @@ from streamlit_extras.metric_cards import style_metric_cards
 st.title("💬 Safety Chatbot — SQL + Optional RAG (Memory-Optimized)")
 
 # ============================================================
+# SESSION STATE INIT
+# ============================================================
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if "email" not in st.session_state:
+    st.session_state.email = None
+
+if "db_loaded" not in st.session_state:
+    st.session_state.db_loaded = False
+
+# ============================================================
 # LOAD ENV
 # ============================================================
 load_dotenv()
@@ -120,27 +132,20 @@ def get_db_paths():
     return items_path, users_path
 
 
-try:
-    if st.session_state.logged_in:
-    DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
-    items_meta = load_db_metadata(DB_PATH_ITEMS, S3_KEYS["items"])
-    users_meta = load_db_metadata(DB_PATH_USERS, S3_KEYS["users"])
-except Exception as e:
-    st.error("❌ Failed to load DB from S3")
-    st.exception(e)
-    st.stop()
-
 # ============================================================
 # SAFE SQL EXECUTION
 # ============================================================
 def run_sql_query(db_path, sql, params=None, limit_rows=None):
-    conn = sqlite3.connect(db_path, timeout=10)
+    conn = sqlite3.connect(db_path, timeout=5)
+
     try:
-        if limit_rows:
-            sql = sql.rstrip().rstrip(";")
-            sql = f"{sql} LIMIT {limit_rows};"
+        # 🚀 auto limit protection
+        if "LIMIT" not in sql.upper():
+            sql = sql.rstrip(";") + " LIMIT 1000"
+
         df = pd.read_sql(sql, conn, params=params)
         return df
+
     finally:
         conn.close()
 
@@ -268,12 +273,12 @@ with st.sidebar:
             email_input = email_input.strip().lower()
 
             with sqlite3.connect(DB_PATH_USERS) as conn:
-                query = f"""
+                query = f'
                     SELECT 1
                     FROM "{users_meta['table']}"
                     WHERE LOWER(email) = ?
                     LIMIT 1;
-                    """
+                    '
                     
                 result = pd.read_sql(query, conn, params=[email_input])
 
@@ -289,6 +294,48 @@ with st.sidebar:
 if not st.session_state.logged_in:
     st.warning("🔒 Please login to continue.")
     st.stop()
+
+# ============================================================
+# STOP IF NOT LOGGED IN
+# ============================================================
+if not st.session_state.logged_in:
+    st.warning("🔒 Please login to continue.")
+    st.stop()
+
+
+# ============================================================
+# LAZY LOAD DB (CORRECT PLACE)
+# ============================================================
+if not st.session_state.db_loaded:
+
+    with st.spinner("Loading database..."):
+        try:
+            DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
+
+            items_meta = load_db_metadata(DB_PATH_ITEMS, S3_KEYS["items"])
+            users_meta = load_db_metadata(DB_PATH_USERS, S3_KEYS["users"])
+
+            # store in session
+            st.session_state.DB_PATH_ITEMS = DB_PATH_ITEMS
+            st.session_state.DB_PATH_USERS = DB_PATH_USERS
+            st.session_state.items_meta = items_meta
+            st.session_state.users_meta = users_meta
+
+            st.session_state.db_loaded = True
+
+        except Exception as e:
+            st.error("❌ Failed to load DB")
+            st.exception(e)
+            st.stop()
+
+
+# ============================================================
+# USE SESSION (SAFE)
+# ============================================================
+DB_PATH_ITEMS = st.session_state.DB_PATH_ITEMS
+DB_PATH_USERS = st.session_state.DB_PATH_USERS
+items_meta = st.session_state.items_meta
+users_meta = st.session_state.users_meta
 
 # ============================================================
 # FILTERS
