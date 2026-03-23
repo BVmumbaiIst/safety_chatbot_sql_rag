@@ -273,7 +273,7 @@ with st.sidebar:
             st.warning("Enter email")
         else:
             try:
-                DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
+                items_path, users_path = get_db_paths()
 
                 conn = sqlite3.connect(DB_PATH_USERS)
 
@@ -302,7 +302,10 @@ with st.sidebar:
 if not st.session_state.logged_in:
     st.warning("🔒 Please login to continue.")
     st.stop()
-
+    
+# ============================================================
+# FILTERS
+# ============================================================
 st.sidebar.header("🔎 Filters (use Run Query to apply)")
 # date inputs robust handling
 date_min = items_meta["meta"].get("date_min")
