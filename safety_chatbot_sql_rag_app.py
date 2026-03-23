@@ -1,67 +1,35 @@
 
+# ============================================================
+# MUST BE FIRST
+# ============================================================
 import streamlit as st
-# ============================================================
-# Basic page config - must be set before ANY st.* call
-# ============================================================
-st.set_page_config(page_title="💬 Safety Chatbot (SQL + Optional RAG)", layout="wide")
-st.title("💬 Safety Chatbot — SQL + Optional RAG (Memory-Optimized)")
+st.set_page_config(page_title="💬 Safety Chatbot AI", layout="wide")
 
-import os
-import sqlite3
-import tempfile
-import atexit
-import time
-import traceback
-import uuid
-import gc
-
+# ============================================================
+# IMPORTS
+# ============================================================
+import os, sqlite3, tempfile, atexit, time, gc, json
 import pandas as pd
 import numpy as np
-
-import json
-from datetime import datetime
 from dotenv import load_dotenv
-from botocore.exceptions import ClientError
 import boto3
 
-# Optional imports (guarded)
 try:
     from langchain_openai import ChatOpenAI
-    from langchain_community.utilities import SQLDatabase
-    from langchain_community.agent_toolkits import create_sql_agent
-    from langchain_community.vectorstores import FAISS
-    from langchain_openai import OpenAIEmbeddings
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-    from langchain_core.documents import Document
-    from langchain.chains.retrieval import RetrievalQA
     LANGCHAIN_AVAILABLE = True
-except Exception:
+except:
     LANGCHAIN_AVAILABLE = False
 
-# visualization libs
-import plotly.express as px
-from streamlit_extras.metric_cards import style_metric_cards
-
 # ============================================================
-# TITLE
-# ============================================================
-
-st.title("💬 Safety Chatbot — SQL + Optional RAG (Memory-Optimized)")
-
-# ============================================================
-# SESSION STATE INIT
+# SESSION INIT
 # ============================================================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
-
-if "email" not in st.session_state:
-    st.session_state.email = None
-
 if "db_loaded" not in st.session_state:
     st.session_state.db_loaded = False
 
 # ============================================================
-# LOAD ENV
+# ENV
 # ============================================================
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -79,47 +47,13 @@ S3_KEYS = {
 s3 = boto3.client("s3")
 
 # ============================================================
-# CLEAN OLD TEMP FILES
+# DOWNLOAD DB (FIXED)
 # ============================================================
-def cleanup_old_dbs(tmp_dir=tempfile.gettempdir(), hours=24):
-    cutoff = time.time() - hours * 3600
-    for file in os.listdir(tmp_dir):
-        if file.endswith(".db"):
-            path = os.path.join(tmp_dir, file)
-            try:
-                if os.path.getmtime(path) < cutoff:
-                    os.remove(path)
-            except:
-                pass
+@st.cache_data
+def load_sqlite_from_s3(s3_key):
+    local_path = os.path.join(tempfile.gettempdir(), os.path.basename(s3_key))
 
-cleanup_old_dbs()
-atexit.register(lambda: cleanup_old_dbs())
-
-# ============================================================
-# DOWNLOAD SQLITE FROM S3 (SAFE)
-# ============================================================
-def load_sqlite_from_s3(s3_key: str):
-
-    filename = os.path.basename(s3_key)
-    local_path = os.path.join(tempfile.gettempdir(), filename)
-
-    # If file missing or corrupted → redownload
-    if not os.path.exists(local_path) or os.path.getsize(local_path) < 1024:
-        if os.path.exists(local_path):
-            os.remove(local_path)
-
-        s3.download_file(BUCKET_NAME, s3_key, local_path)
-
-    # Validate tables
-    conn = sqlite3.connect(local_path)
-    tables = pd.read_sql(
-        "SELECT name FROM sqlite_master WHERE type='table';",
-        conn
-    )
-    conn.close()
-
-    if tables.empty:
-        os.remove(local_path)
+    if not os.path.exists(local_path):
         s3.download_file(BUCKET_NAME, s3_key, local_path)
 
     return local_path
@@ -127,225 +61,129 @@ def load_sqlite_from_s3(s3_key: str):
 
 @st.cache_data
 def get_db_paths():
-    items_meta = load_db_metadata(DB_PATH_ITEMS, S3_KEYS["items"])
-    users_meta = load_db_metadata(DB_PATH_USERS, S3_KEYS["users"])
-    return items_path, users_path
-
+    return (
+        load_sqlite_from_s3(S3_KEYS["items"]),
+        load_sqlite_from_s3(S3_KEYS["users"])
+    )
 
 # ============================================================
-# SAFE SQL EXECUTION
+# METADATA
 # ============================================================
-def run_sql_query(db_path, sql, params=None, limit_rows=None):
-    conn = sqlite3.connect(db_path, timeout=5)
+@st.cache_data
+def load_db_metadata(db_path):
+    conn = sqlite3.connect(db_path)
 
-    try:
-        # 🚀 auto limit protection
-        if "LIMIT" not in sql.upper():
-            sql = sql.rstrip(";") + " LIMIT 1000"
+    tables = pd.read_sql(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
+        conn
+    )
 
-        df = pd.read_sql(sql, conn, params=params)
-        return df
-
-    finally:
+    if tables.empty:
         conn.close()
+        raise Exception("No tables found")
+
+    table = tables.iloc[0]["name"]
+
+    conn.close()
+
+    return {"table": table}
 
 # ============================================================
-# LOAD METADATA SAFELY
+# SQL EXECUTION
 # ============================================================
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_db_metadata(db_path, s3_key=None):
+def run_sql_query(db_path, sql):
+    conn = sqlite3.connect(db_path)
 
-    def _read_metadata(path):
-        conn = sqlite3.connect(path)
-        try:
-            tables = pd.read_sql(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
-                conn
-            )
+    if "LIMIT" not in sql.upper():
+        sql += " LIMIT 1000"
 
-            if tables.empty:
-                return None
-
-            table_name = tables.iloc[0]["name"]
-
-            try:
-                meta_df = pd.read_sql(
-                    f'SELECT MIN("date completed") as date_min, MAX("date completed") as date_max FROM "{table_name}";',
-                    conn
-                )
-                date_min = meta_df["date_min"].iloc[0]
-                date_max = meta_df["date_max"].iloc[0]
-            except Exception:
-                date_min, date_max = None, None
-
-            distincts = {}
-            cols = [
-                "region",
-                "TemplateNames",
-                "owner name",
-                "assignee status",
-                "employee status",
-                "email",
-            ]
-
-            for c in cols:
-                try:
-                    q = f'SELECT DISTINCT "{c}" as val FROM "{table_name}" WHERE "{c}" IS NOT NULL LIMIT 2000;'
-                    vals = pd.read_sql(q, conn)["val"].dropna().tolist()
-                    distincts[c] = sorted(vals)
-                except Exception:
-                    distincts[c] = []
-
-            return {
-                "table": table_name,
-                "meta": {"date_min": date_min, "date_max": date_max},
-                "distincts": distincts,
-            }
-
-        finally:
-            conn.close()
-
-    # Try reading metadata
-    meta = _read_metadata(db_path)
-
-    if meta is not None:
-        return meta
-
-    # If DB corrupted or empty → redownload
-    if s3_key:
-        try:
-            os.remove(db_path)
-        except Exception:
-            pass
-
-        new_path = load_sqlite_from_s3(s3_key)
-
-        meta = _read_metadata(new_path)
-
-        if meta is not None:
-            return meta
-
-    raise RuntimeError("Database could not be loaded or contains no tables")
-    
-
+    df = pd.read_sql(sql, conn)
+    conn.close()
+    return df
 
 # ============================================================
-# LLM setup (cached). If OPENAI_API_KEY missing, llm will be None
+# LLM
 # ============================================================
-@st.cache_resource(show_spinner=False)
+@st.cache_resource
 def setup_llm():
     if not OPENAI_API_KEY:
         return None
-    try:
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=OPENAI_API_KEY)
-        return llm
-    except Exception:
-        return None
+    return ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
 llm = setup_llm()
-if llm is None:
-    st.info("⚠️ No OpenAI API key found or LLM init failed. LLM features will be disabled.")
-
 
 # ============================================================
-# SESSION STATE INIT
+# 🤖 AI SQL GENERATOR
 # ============================================================
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
+def generate_sql(question, table):
+    if not llm:
+        return None
 
-if "email" not in st.session_state:
-    st.session_state.email = None
+    prompt = f"""
+Generate SQLite SQL for table {table}
+Question: {question}
+Return only SQL with LIMIT 1000
+"""
+    return llm.invoke(prompt).content
 
 # ============================================================
-# LOGIN (DIRECT DB VALIDATION)
+# LOGIN
 # ============================================================
 with st.sidebar:
     st.header("🔑 Login")
 
-    email_input = st.text_input("Enter your Email")
+    email = st.text_input("Email")
 
     if st.button("Login"):
 
-        if not email_input:
-            st.warning("Enter email")
+        DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
+
+        conn = sqlite3.connect(DB_PATH_USERS)
+
+        table = pd.read_sql(
+            "SELECT name FROM sqlite_master WHERE type='table'",
+            conn
+        ).iloc[0]["name"]
+
+        result = pd.read_sql(
+            f'SELECT 1 FROM "{table}" WHERE LOWER(email)=?',
+            conn,
+            params=[email.lower()]
+        )
+
+        conn.close()
+
+        if not result.empty:
+            st.session_state.logged_in = True
+            st.session_state.db_loaded = False
+            st.experimental_rerun()
         else:
-            try:
-                DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
-
-                conn = sqlite3.connect(DB_PATH_USERS)
-
-                table_df = pd.read_sql(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
-                    conn
-                )
-
-                if table_df.empty:
-                    st.error("❌ No tables found in USERS DB")
-                    st.stop()
-
-                tables = table_df["name"].tolist()
-                table_name = next((t for t in tables if "user" in t.lower()), tables[0])
-
-                query = f'SELECT 1 FROM "{table_name}" WHERE LOWER(email)=? LIMIT 1'
-                result = pd.read_sql(query, conn, params=[email_input.lower()])
-
-                conn.close()
-
-                if not result.empty:
-                    st.session_state.logged_in = True
-                    st.session_state.email = email_input
-                    st.session_state.db_loaded = False
-                    st.success("✅ Login successful")
-                    st.experimental_rerun()
-                else:
-                    st.error("❌ Access denied")
-
-            except Exception as e:
-                st.error("❌ Login failed")
-                st.exception(e)
-
+            st.error("Access denied")
 
 # ============================================================
-# STOP IF NOT LOGGED IN
+# STOP
 # ============================================================
 if not st.session_state.logged_in:
-    st.warning("🔒 Please login to continue.")
     st.stop()
 
-
 # ============================================================
-# LAZY LOAD DB (CORRECT PLACE)
+# LAZY LOAD
 # ============================================================
 if not st.session_state.db_loaded:
 
-    with st.spinner("Loading database..."):
-        try:
-            DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
+    DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
 
-            items_meta = load_db_metadata(DB_PATH_ITEMS, S3_KEYS["items"])
-            users_meta = load_db_metadata(DB_PATH_USERS, S3_KEYS["users"])
+    items_meta = load_db_metadata(DB_PATH_ITEMS)
 
-            # store in session
-            st.session_state.DB_PATH_ITEMS = DB_PATH_ITEMS
-            st.session_state.DB_PATH_USERS = DB_PATH_USERS
-            st.session_state.items_meta = items_meta
-            st.session_state.users_meta = users_meta
-
-            st.session_state.db_loaded = True
-
-        except Exception as e:
-            st.error("❌ Failed to load DB")
-            st.exception(e)
-            st.stop()
-
+    st.session_state.DB_PATH_ITEMS = DB_PATH_ITEMS
+    st.session_state.items_meta = items_meta
+    st.session_state.db_loaded = True
 
 # ============================================================
-# USE SESSION (SAFE)
+# USE
 # ============================================================
 DB_PATH_ITEMS = st.session_state.DB_PATH_ITEMS
-DB_PATH_USERS = st.session_state.DB_PATH_USERS
-items_meta = st.session_state.items_meta
-users_meta = st.session_state.users_meta
+items_table = st.session_state.items_meta["table"]
 
 # ============================================================
 # FILTERS
