@@ -47,16 +47,26 @@ S3_KEYS = {
 s3 = boto3.client("s3")
 
 # ============================================================
-# DOWNLOAD DB (FIXED)
+# SAFE DOWNLOAD
 # ============================================================
-@st.cache_data
 def load_sqlite_from_s3(s3_key):
-    local_path = os.path.join(tempfile.gettempdir(), os.path.basename(s3_key))
+    path = os.path.join(tempfile.gettempdir(), os.path.basename(s3_key))
 
-    if not os.path.exists(local_path):
-        s3.download_file(BUCKET_NAME, s3_key, local_path)
+    if not os.path.exists(path) or os.path.getsize(path) < 1024:
+        if os.path.exists(path):
+            os.remove(path)
+        s3.download_file(BUCKET_NAME, s3_key, path)
 
-    return local_path
+    # validate DB
+    conn = sqlite3.connect(path)
+    tables = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table'", conn)
+    conn.close()
+
+    if tables.empty:
+        st.error("❌ DB has no tables → check S3 file")
+        st.stop()
+
+    return path
 
 
 @st.cache_data
@@ -65,7 +75,21 @@ def get_db_paths():
         load_sqlite_from_s3(S3_KEYS["items"]),
         load_sqlite_from_s3(S3_KEYS["users"])
     )
+# ============================================================
+# SAFE TABLE FETCH
+# ============================================================
+def get_table_name(conn):
+    df = pd.read_sql(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
+        conn
+    )
 
+    if df.empty:
+        st.error("❌ No tables found in DB")
+        st.stop()
+
+    tables = df["name"].tolist()
+    return next((t for t in tables if "user" in t.lower()), tables[0])
 # ============================================================
 # METADATA
 # ============================================================
@@ -136,29 +160,29 @@ with st.sidebar:
 
     if st.button("Login"):
 
-        DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
+        try:
+            DB_ITEMS, DB_USERS = get_db_paths()
 
-        conn = sqlite3.connect(DB_PATH_USERS)
+            conn = sqlite3.connect(DB_USERS)
+            table = get_table_name(conn)
 
-        table = pd.read_sql(
-            "SELECT name FROM sqlite_master WHERE type='table'",
-            conn
-        ).iloc[0]["name"]
+            result = pd.read_sql(
+                f'SELECT 1 FROM "{table}" WHERE LOWER(email)=?',
+                conn,
+                params=[email.lower()]
+            )
+            conn.close()
 
-        result = pd.read_sql(
-            f'SELECT 1 FROM "{table}" WHERE LOWER(email)=?',
-            conn,
-            params=[email.lower()]
-        )
+            if not result.empty:
+                st.session_state.logged_in = True
+                st.session_state.db_loaded = False
+                st.experimental_rerun()
+            else:
+                st.error("❌ Access denied")
 
-        conn.close()
-
-        if not result.empty:
-            st.session_state.logged_in = True
-            st.session_state.db_loaded = False
-            st.experimental_rerun()
-        else:
-            st.error("Access denied")
+        except Exception as e:
+            st.error("Login failed")
+            st.exception(e)
 
 # ============================================================
 # STOP
@@ -182,8 +206,9 @@ if not st.session_state.db_loaded:
 # ============================================================
 # USE
 # ============================================================
-DB_PATH_ITEMS = st.session_state.DB_PATH_ITEMS
-items_table = st.session_state.items_meta["table"]
+DB_ITEMS = st.session_state.DB_ITEMS
+TABLE = st.session_state.table
+
 
 # ============================================================
 # FILTERS
