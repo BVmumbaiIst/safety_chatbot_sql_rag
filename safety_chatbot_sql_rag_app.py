@@ -226,7 +226,9 @@ def load_db_metadata(db_path, s3_key=None):
             return meta
 
     raise RuntimeError("Database could not be loaded or contains no tables")
-
+    
+items_meta = load_db_metadata(DB_PATH_ITEMS, S3_KEYS["items"])
+users_meta = load_db_metadata(DB_PATH_USERS, S3_KEYS["users"])
 
 # ============================================================
 # LLM setup (cached). If OPENAI_API_KEY missing, llm will be None
