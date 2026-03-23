@@ -273,12 +273,12 @@ with st.sidebar:
             email_input = email_input.strip().lower()
 
             with sqlite3.connect(DB_PATH_USERS) as conn:
-                query = f'
+                query = f`
                     SELECT 1
                     FROM "{users_meta['table']}"
                     WHERE LOWER(email) = ?
                     LIMIT 1;
-                    '
+                    `
                     
                 result = pd.read_sql(query, conn, params=[email_input])
 
