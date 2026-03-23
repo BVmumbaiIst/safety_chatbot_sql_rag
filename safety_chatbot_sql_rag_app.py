@@ -114,7 +114,11 @@ def get_db_paths():
         load_sqlite_from_s3(S3_KEYS["items"]),
         load_sqlite_from_s3(S3_KEYS["users"])
     )
-
+# ============================================================
+# USE DB FROM SESSION
+# ============================================================
+DB_PATH_ITEMS = st.session_state.DB_PATH_ITEMS
+items_meta = st.session_state.items_meta
 # ============================================================
 # LOAD METADATA SAFELY
 # ============================================================
@@ -224,12 +228,7 @@ def load_sqlite_from_s3(s3_key: str):
 
     return local_path
 
-try: 
-     DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
-except Exception as e:
-    st.error("❌ Failed to load DB from S3")
-    st.exception(e)
-    st.stop()
+
 
 # ============================================================
 # SAFE SQL EXECUTION
@@ -265,7 +264,7 @@ if llm is None:
 
 
 # ============================================================
-# LOGIN (FIXED)
+# LOGIN (SAFE + DYNAMIC TABLE)
 # ============================================================
 with st.sidebar:
     st.header("🔑 Login")
@@ -282,15 +281,21 @@ with st.sidebar:
 
                 conn = sqlite3.connect(DB_PATH_USERS)
 
-                # 🔥 get actual table name
+                # 🔥 get table safely
                 table_df = pd.read_sql(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
                     conn
                 )
 
-                table_name = table_df.iloc[0]["name"]
+                if table_df.empty:
+                    st.error("❌ No tables found in USERS DB")
+                    st.stop()
 
-                # 🔥 dynamic query
+                tables = table_df["name"].tolist()
+
+                # smart selection
+                table_name = next((t for t in tables if "user" in t.lower()), tables[0])
+
                 query = f'SELECT 1 FROM "{table_name}" WHERE LOWER(email)=? LIMIT 1'
 
                 result = pd.read_sql(query, conn, params=[email_input.lower()])
@@ -322,17 +327,21 @@ if not st.session_state.logged_in:
 if not st.session_state.db_loaded:
 
     with st.spinner("Loading database..."):
-        DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
+        try:
+            DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
 
-        items_meta = load_db_metadata(DB_PATH_ITEMS)
+            items_meta = load_db_metadata(DB_PATH_ITEMS, S3_KEYS["items"])
 
-        st.session_state.DB_PATH_ITEMS = DB_PATH_ITEMS
-        st.session_state.items_meta = items_meta
-        st.session_state.db_loaded = True
+            # store in session
+            st.session_state.DB_PATH_ITEMS = DB_PATH_ITEMS
+            st.session_state.items_meta = items_meta
 
-# reuse
-DB_PATH_ITEMS = st.session_state.DB_PATH_ITEMS
-items_meta = st.session_state.items_meta
+            st.session_state.db_loaded = True
+
+        except Exception as e:
+            st.error("❌ Failed to load DB")
+            st.exception(e)
+            st.stop()
 
 # ============================================================
 # FILTERS
