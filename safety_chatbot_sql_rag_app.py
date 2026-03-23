@@ -282,11 +282,18 @@ with st.sidebar:
 
                 conn = sqlite3.connect(DB_PATH_USERS)
 
-                result = pd.read_sql(
-                    'SELECT 1 FROM users WHERE LOWER(email)=?',
-                    conn,
-                    params=[email_input.lower()]
+                # 🔥 get actual table name
+                table_df = pd.read_sql(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
+                    conn
                 )
+
+                table_name = table_df.iloc[0]["name"]
+
+                # 🔥 dynamic query
+                query = f'SELECT 1 FROM "{table_name}" WHERE LOWER(email)=? LIMIT 1'
+
+                result = pd.read_sql(query, conn, params=[email_input.lower()])
 
                 conn.close()
 
