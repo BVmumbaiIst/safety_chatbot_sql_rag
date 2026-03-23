@@ -127,8 +127,8 @@ def load_sqlite_from_s3(s3_key: str):
 
 @st.cache_data
 def get_db_paths():
-    items_path = load_sqlite_from_s3(S3_KEYS["items"])
-    users_path = load_sqlite_from_s3(S3_KEYS["users"])
+    items_meta = load_db_metadata(DB_PATH_ITEMS, S3_KEYS["items"])
+    users_meta = load_db_metadata(DB_PATH_USERS, S3_KEYS["users"])
     return items_path, users_path
 
 
@@ -227,8 +227,6 @@ def load_db_metadata(db_path, s3_key=None):
 
     raise RuntimeError("Database could not be loaded or contains no tables")
 
-items_meta = load_db_metadata(DB_PATH_ITEMS, S3_KEYS["items"])
-users_meta = load_db_metadata(DB_PATH_USERS, S3_KEYS["users"])
 
 # ============================================================
 # LLM setup (cached). If OPENAI_API_KEY missing, llm will be None
