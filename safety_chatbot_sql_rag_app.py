@@ -148,13 +148,13 @@ def get_db_paths():
     users_path = load_sqlite_from_s3_cached(S3_KEYS["users"])
     return items_path, users_path
 
-# # Try to load paths now; if fails, stop the app gracefully
-# try:
-#     DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
-# except Exception as e:
-#     st.error("❌ Could not load database files from S3 or local path.")
-#     st.exception(e)
-#     st.stop()
+# Try to load paths now; if fails, stop the app gracefully
+try:
+    DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
+except Exception as e:
+    st.error("❌ Could not load database files from S3 or local path.")
+    st.exception(e)
+    st.stop()
 
 # ============================================================
 # Utility functions: DB connections & quick SQL run
@@ -215,9 +215,9 @@ def load_db_metadata(db_path, table_hint=None):
     finally:
         conn.close()
 
-# # load metadata for items and users
-# items_meta = load_db_metadata(DB_PATH_ITEMS)
-# users_meta = load_db_metadata(DB_PATH_USERS)
+# load metadata for items and users
+items_meta = load_db_metadata(DB_PATH_ITEMS)
+users_meta = load_db_metadata(DB_PATH_USERS)
 
 # ============================================================
 # LLM setup (cached). If OPENAI_API_KEY missing, llm will be None
