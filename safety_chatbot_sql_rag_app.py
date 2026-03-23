@@ -52,6 +52,19 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # ============================================================
+# SESSION INIT
+# ============================================================
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if "email" not in st.session_state:
+    st.session_state.email = None
+
+if "db_loaded" not in st.session_state:
+    st.session_state.db_loaded = False
+
+
+# ============================================================
 # S3 CONFIG
 # ============================================================
 # AWS S3 config (if you store DBs in S3)
@@ -135,13 +148,13 @@ def get_db_paths():
     users_path = load_sqlite_from_s3_cached(S3_KEYS["users"])
     return items_path, users_path
 
-# Try to load paths now; if fails, stop the app gracefully
-try:
-    DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
-except Exception as e:
-    st.error("❌ Could not load database files from S3 or local path.")
-    st.exception(e)
-    st.stop()
+# # Try to load paths now; if fails, stop the app gracefully
+# try:
+#     DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
+# except Exception as e:
+#     st.error("❌ Could not load database files from S3 or local path.")
+#     st.exception(e)
+#     st.stop()
 
 # ============================================================
 # Utility functions: DB connections & quick SQL run
