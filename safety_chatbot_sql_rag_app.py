@@ -264,39 +264,19 @@ def build_where_clause(selected_filters, date_range_tuple=None):
 # ============================================================
 with st.sidebar:
     st.header("🔑 Login")
-
-    email_input = st.text_input("Enter your Email")
-
+    entered_email = st.text_input("Enter your Email", key="login_email")
     if st.button("Login"):
-
-        if not email_input:
-            st.warning("Enter email")
+        emails_list = users_meta["distincts"].get("email", [])
+        if entered_email:
+            if entered_email in emails_list:
+                st.session_state["logged_in"] = True
+                st.session_state["email"] = entered_email
+                st.success(f"✅ Logged in as: {entered_email}")
+            else:
+                st.session_state["logged_in"] = False
+                st.error("❌ Access denied. Email not found.")
         else:
-            try:
-                items_path, users_path = get_db_paths()
-
-                conn = sqlite3.connect(users_path)
-
-                result = pd.read_sql(
-                    'SELECT 1 FROM users WHERE LOWER(email)=?',
-                    conn,
-                    params=[email_input.lower()]
-                )
-
-                conn.close()
-
-                if not result.empty:
-                    st.session_state.logged_in = True
-                    st.session_state.email = email_input
-                    st.session_state.db_loaded = False
-                    st.success("✅ Login successful")
-                    st.experimental_rerun()
-                else:
-                    st.error("❌ Access denied")
-
-            except Exception as e:
-                st.error("❌ Login failed")
-                st.exception(e)
+            st.warning("Please enter an email.")
 
 # Require login
 if not st.session_state.logged_in:
