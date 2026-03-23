@@ -275,7 +275,7 @@ with st.sidebar:
             try:
                 items_path, users_path = get_db_paths()
 
-                conn = sqlite3.connect(DB_PATH_USERS)
+                conn = sqlite3.connect(users_path)
 
                 result = pd.read_sql(
                     'SELECT 1 FROM users WHERE LOWER(email)=?',
