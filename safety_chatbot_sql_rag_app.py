@@ -51,6 +51,9 @@ st.title("💬 Safety Chatbot — SQL + Optional RAG (Memory-Optimized)")
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+# ============================================================
+# S3 CONFIG
+# ============================================================
 # AWS S3 config (if you store DBs in S3)
 BUCKET_NAME = "iauditorsafetydata"
 S3_KEYS = {
@@ -66,20 +69,15 @@ s3 = boto3.client("s3")
 # ============================================================
 def cleanup_old_dbs(tmp_dir=tempfile.gettempdir(), hours=24):
     cutoff = time.time() - hours * 3600
-    removed = 0
     for file in os.listdir(tmp_dir):
         if file.endswith(".db"):
             path = os.path.join(tmp_dir, file)
             try:
                 if os.path.getmtime(path) < cutoff:
                     os.remove(path)
-                    removed += 1
-            except Exception:
+            except:
                 pass
-    if removed:
-        st.info(f"Cleaned up {removed} old temp .db files from {tmp_dir}")
 
-# run immediately (Streamlit reruns will call this often but it's cheap)
 cleanup_old_dbs()
 atexit.register(lambda: cleanup_old_dbs())
 
