@@ -291,33 +291,16 @@ st.sidebar.header("🔎 Filters (use Run Query to apply)")
 date_min = items_meta["meta"].get("date_min")
 date_max = items_meta["meta"].get("date_max")
 
-if date_min is not None and date_max is not None:
-    try:
-        default_dates = [pd.to_datetime(date_min).date(), pd.to_datetime(date_max).date()]
-    except Exception:
-        default_dates = None
+if date_min and date_max:
+    date_range = st.sidebar.date_input(
+        "Date Range",
+        value=[
+            pd.to_datetime(date_min).date(),
+            pd.to_datetime(date_max).date()
+        ]
+    )
 else:
-    default_dates = None
-
-date_range = st.sidebar.date_input(
-    "Select Date Range",
-    value=default_dates,
-    min_value=pd.to_datetime(date_min).date() if date_min is not None else None,
-    max_value=pd.to_datetime(date_max).date() if date_max is not None else None
-)
-
-# normalize date_range
-if isinstance(date_range, (list, tuple)):
-    if len(date_range) == 0:
-        date_range = None
-    elif len(date_range) == 1:
-        date_range = (date_range[0], date_range[0])
-else:
-    # single date returned sometimes - convert to tuple
-    try:
-        date_range = (date_range, date_range)
-    except Exception:
-        date_range = None
+    date_range = None
 
 # filter pickers use limited distinct lists already loaded
 regions = st.sidebar.multiselect("Select Regions", items_meta["distincts"].get("region", []))
