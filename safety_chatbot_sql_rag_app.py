@@ -270,30 +270,41 @@ with st.sidebar:
         if not email_input:
             st.warning("Enter email")
         else:
-            email_input = email_input.strip().lower()
+            try:
+                DB_PATH_ITEMS, DB_PATH_USERS = get_db_paths()
 
-            with sqlite3.connect(DB_PATH_USERS) as conn:
-                query = f'
-                    SELECT 1
-                    FROM "{users_meta['table']}"
-                    WHERE LOWER(email) = ?
-                    LIMIT 1
-                    '
-                    
-                result = pd.read_sql(query, conn, params=[email_input])
+                conn = sqlite3.connect(DB_PATH_USERS)
 
-            if not result.empty:
-                st.session_state.logged_in = True
-                st.session_state.email = email_input
-                st.success("✅ Login successful")
-                st.experimental_rerun()
-            else:
-                st.error("❌ Access denied")
+                table_df = pd.read_sql(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
+                    conn
+                )
 
-# Require login
-if not st.session_state.logged_in:
-    st.warning("🔒 Please login to continue.")
-    st.stop()
+                if table_df.empty:
+                    st.error("❌ No tables found in USERS DB")
+                    st.stop()
+
+                tables = table_df["name"].tolist()
+                table_name = next((t for t in tables if "user" in t.lower()), tables[0])
+
+                query = f'SELECT 1 FROM "{table_name}" WHERE LOWER(email)=? LIMIT 1'
+                result = pd.read_sql(query, conn, params=[email_input.lower()])
+
+                conn.close()
+
+                if not result.empty:
+                    st.session_state.logged_in = True
+                    st.session_state.email = email_input
+                    st.session_state.db_loaded = False
+                    st.success("✅ Login successful")
+                    st.experimental_rerun()
+                else:
+                    st.error("❌ Access denied")
+
+            except Exception as e:
+                st.error("❌ Login failed")
+                st.exception(e)
+
 
 # ============================================================
 # STOP IF NOT LOGGED IN
