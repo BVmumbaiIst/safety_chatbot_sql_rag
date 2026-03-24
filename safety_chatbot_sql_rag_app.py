@@ -98,41 +98,30 @@ atexit.register(lambda: cleanup_old_dbs())
 # S3 helper: download DB if not present locally & validate
 # (if you keep DBs in S3). If you store DBs in repo, adapt accordingly.
 # ============================================================
-def load_sqlite_from_s3_cached(s3_key: str):
-    """
-    Download an S3 object to /tmp if not present already.
-    Returns local path to .db
-    """
-    base_name = os.path.basename(s3_key).replace("/", "_")
-    local_path = os.path.join(tempfile.gettempdir(), base_name)
+def load_sqlite_from_s3(s3_key: str):
 
-    # if exists and appears valid, reuse
-    if os.path.exists(local_path) and os.path.getsize(local_path) > 1024:
-        return local_path
+    filename = os.path.basename(s3_key)
+    local_path = os.path.join(tempfile.gettempdir(), filename)
 
-    # Attempt download
-    try:
-        s3.download_file(BUCKET_NAME, s3_key, local_path)
-    except Exception as e:
-        raise RuntimeError(f"Failed to download {s3_key} from S3: {e}")
-
-    # Validate quickly
-    try:
-        conn = sqlite3.connect(local_path)
-        tables = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table';", conn)
-        conn.close()
-        if tables.empty:
-            raise RuntimeError(f"No tables found in downloaded DB: {local_path}")
-    except Exception as e:
-        # remove broken file
-        try:
+    # If file missing or corrupted → redownload
+    if not os.path.exists(local_path) or os.path.getsize(local_path) < 1024:
+        if os.path.exists(local_path):
             os.remove(local_path)
-        except Exception:
-            pass
-        raise RuntimeError(f"Downloaded DB validation failed: {e}")
 
-    # ensure cleanup on exit
-    atexit.register(lambda: os.path.exists(local_path) and os.remove(local_path))
+        s3.download_file(BUCKET_NAME, s3_key, local_path)
+
+    # Validate tables
+    conn = sqlite3.connect(local_path)
+    tables = pd.read_sql(
+        "SELECT name FROM sqlite_master WHERE type='table';",
+        conn
+    )
+    conn.close()
+
+    if tables.empty:
+        os.remove(local_path)
+        s3.download_file(BUCKET_NAME, s3_key, local_path)
+
     return local_path
 
 # ============================================================
@@ -140,12 +129,8 @@ def load_sqlite_from_s3_cached(s3_key: str):
 # ============================================================
 @st.cache_resource(show_spinner=False)
 def get_db_paths():
-    """
-    Returns tuple (items_db_path, users_db_path)
-    If S3 is unavailable this raises.
-    """
-    items_path = load_sqlite_from_s3_cached(S3_KEYS["items"])
-    users_path = load_sqlite_from_s3_cached(S3_KEYS["users"])
+    items_path = load_sqlite_from_s3(S3_KEYS["items"])
+    users_path = load_sqlite_from_s3(S3_KEYS["users"])
     return items_path, users_path
 
 # Try to load paths now; if fails, stop the app gracefully
@@ -183,41 +168,82 @@ def run_sql_query(db_path, sql, params=None, limit_rows=None):
 # Metadata loader (small queries only) - cached
 # ============================================================
 @st.cache_data(ttl=3600, show_spinner=False)
-def load_db_metadata(db_path, table_hint=None):
-    """
-    Loads small metadata (min/max dates and distinct values for filters)
-    Returns dict with keys: table, date_min, date_max, distincts
-    """
-    conn = sqlite3.connect(db_path, timeout=10)
-    try:
-        # detect first table
-        tbl_df = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1;", conn)
-        table_name = tbl_df.iloc[0, 0] if not tbl_df.empty else (table_hint or "")
-        meta = {}
+def load_db_metadata(db_path, s3_key=None):
+
+    def _read_metadata(path):
+        conn = sqlite3.connect(path)
         try:
-            meta_df = pd.read_sql(f'SELECT MIN("date completed") as date_min, MAX("date completed") as date_max FROM "{table_name}";', conn)
-            meta["date_min"] = meta_df["date_min"].iloc[0] if not meta_df.empty else None
-            meta["date_max"] = meta_df["date_max"].iloc[0] if not meta_df.empty else None
-        except Exception:
-            meta["date_min"], meta["date_max"] = None, None
+            tables = pd.read_sql(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
+                conn
+            )
 
-        distincts = {}
-        # columns we want to use as filters (tunable)
-        cols = ["region", "TemplateNames", "owner name", "assignee status", "employee status", "email"]
-        for c in cols:
+            if tables.empty:
+                return None
+
+            table_name = tables.iloc[0]["name"]
+
             try:
-                q = f'SELECT DISTINCT "{c}" as val FROM "{table_name}" WHERE "{c}" IS NOT NULL LIMIT 2000;'
-                vals = pd.read_sql(q, conn)["val"].dropna().tolist()
-                distincts[c] = sorted(vals)
+                meta_df = pd.read_sql(
+                    f'SELECT MIN("date completed") as date_min, MAX("date completed") as date_max FROM "{table_name}";',
+                    conn
+                )
+                date_min = meta_df["date_min"].iloc[0]
+                date_max = meta_df["date_max"].iloc[0]
             except Exception:
-                distincts[c] = []
-        return {"table": table_name, "meta": meta, "distincts": distincts}
-    finally:
-        conn.close()
+                date_min, date_max = None, None
 
-# load metadata for items and users
-items_meta = load_db_metadata(DB_PATH_ITEMS)
-users_meta = load_db_metadata(DB_PATH_USERS)
+            distincts = {}
+            cols = [
+                "region",
+                "TemplateNames",
+                "owner name",
+                "assignee status",
+                "employee status",
+                "email",
+            ]
+
+            for c in cols:
+                try:
+                    q = f'SELECT DISTINCT "{c}" as val FROM "{table_name}" WHERE "{c}" IS NOT NULL LIMIT 2000;'
+                    vals = pd.read_sql(q, conn)["val"].dropna().tolist()
+                    distincts[c] = sorted(vals)
+                except Exception:
+                    distincts[c] = []
+
+            return {
+                "table": table_name,
+                "meta": {"date_min": date_min, "date_max": date_max},
+                "distincts": distincts,
+            }
+
+        finally:
+            conn.close()
+
+    # Try reading metadata
+    meta = _read_metadata(db_path)
+
+    if meta is not None:
+        return meta
+
+    # If DB corrupted or empty → redownload
+    if s3_key:
+        try:
+            os.remove(db_path)
+        except Exception:
+            pass
+
+        new_path = load_sqlite_from_s3(s3_key)
+
+        meta = _read_metadata(new_path)
+
+        if meta is not None:
+            return meta
+
+    raise RuntimeError("Database could not be loaded or contains no tables")
+
+items_meta = load_db_metadata(DB_PATH_ITEMS, S3_KEYS["items"])
+users_meta = load_db_metadata(DB_PATH_USERS, S3_KEYS["users"])
 
 # ============================================================
 # LLM setup (cached). If OPENAI_API_KEY missing, llm will be None
